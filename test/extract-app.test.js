@@ -49,3 +49,20 @@ test('sidecar stubs cover every node id with engineer.file prefilled', () => {
 test('extraction is deterministic', () => {
   assert.equal(JSON.stringify(extract(FIXTURE)), JSON.stringify(extract(FIXTURE)));
 });
+
+test('emits import edges between file modules', () => {
+  const { graph } = extract(FIXTURE);
+  const has = (from, to) => graph.edges.some(e => e.from === from && e.to === to && e.kind === 'import');
+  // src/routes/orders.ts imports services/paymentProcessor.ts and lib/db.ts
+  const ordersId = require('../skill/scripts/extract-app').fileIdFor('src/routes/orders.ts');
+  const payId = require('../skill/scripts/extract-app').fileIdFor('src/services/paymentProcessor.ts');
+  const dbId = require('../skill/scripts/extract-app').fileIdFor('src/lib/db.ts');
+  assert.ok(has(ordersId, payId), 'orders → paymentProcessor');
+  assert.ok(has(ordersId, dbId), 'orders → db');
+  graph.edges.forEach(e => { assert.equal(e.kind, 'import'); assert.equal(e.rel, 'imports'); });
+});
+
+test('graph now clears the shallow-graph floor', () => {
+  const { graph } = extract(FIXTURE);
+  assert.ok(graph.edges.length >= 3, 'has >= 3 edges');
+});

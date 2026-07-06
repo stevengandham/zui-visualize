@@ -459,6 +459,17 @@ function extract(root) {
     addSidecar(id, base, relFile, '', deps);
   }
 
+  // Import edges: resolve each file's requires to a target file-module id
+  for (const [relFile, data] of fileData) {
+    const fromId = fileIdFor(relFile);
+    for (const spec of data.requires) {
+      const resolved = resolveRequire(relFile, spec);
+      if (resolved && fileData.has(resolved)) {
+        g.addEdge(fromId, fileIdFor(resolved), 'import', 'imports');
+      }
+    }
+  }
+
   g.assignSlots({});
 
   const graph = g.build();
