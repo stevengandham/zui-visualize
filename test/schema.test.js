@@ -26,6 +26,7 @@ test('addNode is idempotent by id, addEdge dedupes and drops self-edges', () => 
   g.addNode({ id: 'n2', label: 'two', layer: 'app', shape: 'rect' });
   g.addEdge('n1', 'n2', 'import', 'imports');
   g.addEdge('n1', 'n2', 'import', 'imports'); // dup
+  g.addEdge('n1', 'n2', 'import'); // dup: rel is not part of the dedup key
   g.addEdge('n1', 'n1', 'import'); // self
   const { nodes, edges } = g.build();
   assert.equal(nodes.find(n => n.id === 'n1').label, 'first');
