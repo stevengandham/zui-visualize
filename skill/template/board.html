@@ -104,6 +104,9 @@ button.icon-btn svg{width:18px;height:18px}
 #searchClear{display:none}
 #searchWrap.has-q #searchClear{display:flex;width:24px;height:24px;border-radius:8px}
 
+#viewToggle{top:16px;left:50%;transform:translateX(-50%);padding:4px;gap:2px;border-radius:14px}
+#viewToggle .icon-btn{width:auto;padding:0 10px;font:600 12px var(--font)}
+
 #toolbar{left:16px;top:50%;transform:translateY(-50%);flex-direction:column;
   padding:8px 6px;gap:8px;border-radius:20px}
 
@@ -195,7 +198,7 @@ button.icon-btn svg{width:18px;height:18px}
     <!-- floating chrome -->
     <div id="boardChip" class="chrome pill pill-soft">
       <div class="dot"></div>
-      <div class="t">checkout-service <span>· architecture board</span></div>
+      <div class="t"><span id="chipName"></span> <span>· architecture board</span></div>
     </div>
 
     <div id="searchWrap" class="chrome pill pill-soft">
@@ -204,6 +207,11 @@ button.icon-btn svg{width:18px;height:18px}
       <button id="searchClear" class="icon-btn" title="Clear search" aria-label="Clear search">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
       </button>
+    </div>
+
+    <div id="viewToggle" class="chrome pill pill-soft" role="group" aria-label="View mode">
+      <button class="icon-btn active" id="viewEng" title="Engineer view">Eng</button>
+      <button class="icon-btn" id="viewProd" title="Product view">Product</button>
     </div>
 
     <div id="toolbar" class="chrome pill">
@@ -296,6 +304,23 @@ const rand = mulberry32(42);
 /* ===================== model prep ===================== */
 const nodes = GRAPH.nodes.map(n => ({...n, x:0, y:0, w:130, h:46, fixed:false, hidden:false}));
 const nodeById = new Map(nodes.map(n => [n.id, n]));
+
+/* ===================== view mode (Engineer / Product) ===================== */
+let viewMode = 'engineer';
+function labelFor(n){
+  if (viewMode === 'product') return (LABELS && LABELS[n.id]) || n.label;
+  return n.label;
+}
+function setViewMode(m){
+  viewMode = m;
+  document.getElementById('viewEng').classList.toggle('active', m === 'engineer');
+  document.getElementById('viewProd').classList.toggle('active', m === 'product');
+  nodes.forEach(n => { n._lbl.textContent = labelFor(n); });
+  sizeNodes();
+  nodes.forEach(placeNode);
+  buildEdges();
+  if (selected) renderPanel(selected);
+}
 const edges = GRAPH.edges.map(e => ({...e}));
 const clusters = GRAPH.clusters.map(c => ({...c, members:[], box:null, hidden:false}));
 const clusterById = new Map(clusters.map(c => [c.id, c]));
@@ -357,7 +382,7 @@ function buildNode(n){
     n._card = el('rect', {class:'card', rx:10, ry:10}, cg);
     n._stripe = el('rect', {class:'stripe', fill:color, rx:2, ry:2}, cg);
   }
-  n._lbl = el('text', {class:'lbl'}, cg); n._lbl.textContent = n.label;
+  n._lbl = el('text', {class:'lbl'}, cg); n._lbl.textContent = labelFor(n);
   if (n.sub){ n._sub = el('text', {class:'sub'}, cg); n._sub.textContent = n.sub; }
   if (n.shape === 'pipe'){ n._chev = el('path', {class:'chev'}, cg); }
 
@@ -718,15 +743,45 @@ function renderPanel(n){
   mk(n.fanOut, 'fan-out'); mk(n.fanIn, 'fan-in');
   body.appendChild(mx);
 
-  if (n.details && n.details.length){
-    const s = document.createElement('div'); s.className = 'sect'; s.textContent = 'Parsed fields';
+  const kvRow = (k, v) => {
+    if (Array.isArray(v)) v = v.join(', ');
+    if (v == null || v === '') return;
+    const r = document.createElement('div'); r.className = 'kv';
+    r.innerHTML = `<span class="k"></span><span class="v"></span>`;
+    r.querySelector('.k').textContent = k; r.querySelector('.v').textContent = v;
+    body.appendChild(r);
+  };
+  const sect = t => {
+    const s = document.createElement('div'); s.className = 'sect'; s.textContent = t;
     body.appendChild(s);
-    n.details.forEach(([k, v]) => {
-      const r = document.createElement('div'); r.className = 'kv';
-      r.innerHTML = `<span class="k"></span><span class="v"></span>`;
-      r.querySelector('.k').textContent = k; r.querySelector('.v').textContent = v;
-      body.appendChild(r);
-    });
+  };
+  const meta = (META && META[n.id]) || null;
+
+  if (viewMode === 'product'){
+    const prod = meta && meta.product;
+    if (prod){
+      if (prod.description){
+        sect('What it does');
+        const p = document.createElement('div');
+        p.style.cssText = 'font:400 12px var(--font);line-height:1.5;margin-top:2px';
+        p.textContent = prod.description;
+        body.appendChild(p);
+      }
+      kvRow('inputs', prod.inputs);
+      kvRow('outputs', prod.outputs);
+    }
+  } else {
+    if (n.details && n.details.length){
+      sect('Parsed fields');
+      n.details.forEach(([k, v]) => kvRow(k, v));
+    }
+    const eng = meta && meta.engineer;
+    if (eng && (eng.signature || eng.notes || (eng.deps && eng.deps.length))){
+      sect('Engineer notes');
+      kvRow('signature', eng.signature);
+      kvRow('notes', eng.notes);
+      kvRow('deps', eng.deps);
+    }
   }
 
   const outs = edges.filter(e => e.from === n.id);
@@ -823,6 +878,8 @@ function setTool(t){
 $('toolSelect').addEventListener('click', () => setTool('select'));
 $('toolHand').addEventListener('click', () => setTool('hand'));
 $('toolFit').addEventListener('click', () => fitView());
+document.getElementById('viewEng').addEventListener('click', () => setViewMode('engineer'));
+document.getElementById('viewProd').addEventListener('click', () => setViewMode('product'));
 
 const pointers = new Map();
 let gesture = null; /* {type:'pan'|'node'|'frame'|'pinch', ...} */
@@ -1049,6 +1106,7 @@ function dismissHint(){ if (hintGone) return; hintGone = true; $('hint').classLi
 setTimeout(dismissHint, 7000);
 
 /* ===================== init ===================== */
+document.getElementById('chipName').textContent = GRAPH.title || 'repo';
 sizeNodes();
 forceLayout();
 nodes.forEach(placeNode);

@@ -54,3 +54,12 @@ test('script-breaking sequences are escaped', () => {
   assert.equal(out.includes('alert(1)</script>'), false);
   assert.ok(out.includes('\\u003c/script'));
 });
+
+const fs = require('fs');
+const path = require('path');
+test('template ships the Product/Engineer toggle and label logic', () => {
+  const tpl = fs.readFileSync(path.join(__dirname, '..', 'skill', 'template', 'board.html'), 'utf8');
+  assert.match(tpl, /id="viewToggle"/);
+  assert.match(tpl, /function labelFor\(/);
+  assert.match(tpl, /viewMode\s*===\s*'product'/);
+});
