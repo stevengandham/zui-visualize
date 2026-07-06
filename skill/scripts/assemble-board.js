@@ -14,7 +14,8 @@ function assemble({ template, graph, labels, meta }) {
   let out = template;
   for (const [marker, key] of Object.entries(MARKERS)) {
     if (!out.includes(marker)) throw new Error(`Template missing marker for ${key}: ${marker}`);
-    out = out.replace(marker, JSON.stringify(data[key], null, 2));
+    const json = JSON.stringify(data[key], null, 2).replace(/</g, '\\u003c');
+    out = out.replace(marker, () => json);
   }
   return out;
 }
