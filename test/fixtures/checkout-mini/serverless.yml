@@ -1,0 +1,7 @@
+service: checkout-mini
+provider:
+  name: aws
+  runtime: nodejs20.x
+functions:
+  webhook:
+    handler: src/handlers/webhook.handler
