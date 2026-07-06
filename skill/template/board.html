@@ -319,7 +319,7 @@ function setViewMode(m){
   sizeNodes();
   nodes.forEach(placeNode);
   buildEdges();
-  if (selected) renderPanel(selected);
+  if (selected) selectNode(selected, false);
 }
 const edges = GRAPH.edges.map(e => ({...e}));
 const clusters = GRAPH.clusters.map(c => ({...c, members:[], box:null, hidden:false}));
