@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-<title>zui-visualize · checkout-service</title>
+<title>zui-visualize · architecture board</title>
 <style>
 :root{
   --canvas-bg:#FAFAFB;
@@ -1107,6 +1107,7 @@ setTimeout(dismissHint, 7000);
 
 /* ===================== init ===================== */
 document.getElementById('chipName').textContent = GRAPH.title || 'repo';
+document.title = 'zui-visualize · ' + (GRAPH.title || 'repo');
 sizeNodes();
 forceLayout();
 nodes.forEach(placeNode);

@@ -445,7 +445,7 @@ function extract(root) {
     const base = path.basename(relFile);
     const isRoute = data.routes.length > 0;
     const external = detectExternal(data.src); // returns string like 'Stripe API' or null
-    const details = [['Type', isRoute ? 'route module' : 'module'], ['Language', 'TypeScript']];
+    const details = [['Type', isRoute ? 'route module' : 'module'], ['Language', /\.tsx?$/.test(relFile) ? 'TypeScript' : 'JavaScript']];
     if (isRoute) {
       details.push(['Endpoints', data.routes.map(r => `${r.method} ${r.path}`).join(' · ')]);
     }
