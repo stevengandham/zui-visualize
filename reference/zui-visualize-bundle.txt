@@ -1,0 +1,1250 @@
+==================================================================
+ZUI-VISUALIZE SKILL BUNDLE (plain text, no attachment)
+==================================================================
+To reinstall:
+1. mkdir -p ~/.claude/skills/zui-visualize/contexts
+   mkdir -p ~/.claude/skills/zui-visualize/scripts
+2. For each "=== FILE: <path> ===" block below, create that file
+   under ~/.claude/skills/zui-visualize/<path> and paste the content
+   between the markers (excluding the markers themselves).
+3. cd ~/.claude/skills/zui-visualize/scripts && npm install
+==================================================================
+
+=== FILE: skill.md ===
+---
+name: zui-visualize
+description: Generate a ZUI infinite canvas visualization for any codebase. Analyzes the target project, builds a domain-specific knowledge base, produces a running Vite+React app (HTML5 Canvas 2D engine, Miro-scale performance) in ~/Documents/jasper/zui, and writes all output into the project's own /docs folder.
+allowed-tools: Bash Read Write Edit Glob Grep
+---
+
+# ZUI Visualize
+
+Analyze a codebase and generate an interactive infinite canvas visualization of its architecture.
+
+The viewer uses an HTML5 `<canvas>` 2D engine (not DOM/CSS transforms) for smooth rendering at thousands of nodes.
+Engine internals: see `${CLAUDE_SKILL_DIR}/contexts/canvas-engine.md`.
+
+## Output
+
+- `<ROOT>/docs/zui/` — `graph.json`, `metadata.js`, `productLabels.js`, `knowledge-base.md`
+- `~/Documents/jasper/zui/src/projects/<slug>/` — per-project copies registered in the ZUI app
+- `<ROOT>/docs/architecture.html` — Reveal.js deck (only with `--slides`)
+- `<ROOT>/docs/README.md` — created only if `/docs` didn't exist
+
+## Arguments
+
+`$ARGUMENTS` = absolute or `~`-relative path to the project root. If empty, ask.
+
+Flags: `--slides` — generate Reveal.js architecture deck (Phase 5).
+
+---
+
+## Context Loading
+
+Load `${CLAUDE_SKILL_DIR}/contexts/graph-schema.md` at start — it defines node/edge schema, ID conventions, and output file formats.
+
+Do NOT load `extraction-patterns.md` until Phase 1. When loaded, read ONLY the section matching the detected framework.
+
+---
+
+## Phase 0 — Project Orientation
+
+Goal: build a draft knowledge base from docs alone.
+
+**0a — Resolve path:**
+```bash
+ROOT=$(realpath "$ARGUMENTS" 2>/dev/null || echo "$ARGUMENTS")
+ls "$ROOT" || { echo "Path does not exist"; exit 1; }
+ls "$ROOT/docs" 2>/dev/null || echo "NO_DOCS_FOLDER"
+```
+
+**0b — Read documentation (stop when `service_name` + `service_purpose` are filled):**
+
+Priority order (max 10 files): README.md → docs/README.md → docs/index.md → docs/overview.md → ARCHITECTURE.md → docs/architecture.md → CONTRIBUTING.md → root .md files → manifest description fields.
+
+**0c — Construct draft knowledge base (in-memory, do not write yet):**
+
+Fields: `service_name`, `service_purpose` (one sentence), `domain_vocab` (abbrev→expansion), `layers` (id/name/description/files), `external_deps` (name/purpose), `route_docs` (method/path/purpose), `key_concepts`, `project_type`.
+
+Project type classification:
+| Signal | Type |
+|--------|------|
+| HTTP/RPC routes | `web-service` |
+| `bin` field or CLI commands | `cli-tool` |
+| Library exports, no server | `library` |
+| DAG/pipeline defs (Airflow, dbt, Step Functions) | `data-pipeline` |
+| Terraform/CDK/CloudFormation primary | `infra` |
+| Multiple independent services in subdirs | `monorepo` |
+
+---
+
+## Phase 1 — Detect Project Structure
+
+Load `${CLAUDE_SKILL_DIR}/contexts/extraction-patterns.md` — read ONLY the matching framework section.
+
+1. Detect language + framework from manifest files
+2. Find entry point
+3. Locate structural directories: routes/handlers, business logic, data layer, external clients
+
+Adaptations by project type:
+- `cli-tool` → subcommands as routes
+- `library` → public exports as routes
+- `data-pipeline` → DAG steps as routes
+- `infra` → Terraform modules as nodes, skip route extraction
+
+### Validation Gate
+
+| Check | Action |
+|-------|--------|
+| No entry point | Ask user |
+| Zero structural dirs | Report scan, ask user |
+| Monorepo | Ask which sub-project |
+
+---
+
+## Phase 2 — Extract Graph
+
+Run the bundled extractor (zero LLM tool calls):
+
+```bash
+node "${CLAUDE_SKILL_DIR}/scripts/extract-graph.js" "$ROOT" \
+  --output "$ROOT/docs/zui/graph.json"
+```
+
+Handles: 4 node types (system/service/route/function), const-binding resolution, cross-file call graph, 60-node ceiling.
+
+**If exit non-zero or graph < 4 nodes:** fall back to grep-based extraction using patterns from extraction-patterns.md (up to 10 tool calls).
+
+---
+
+## Phase 2b — Finalize Knowledge Base
+
+Update draft with: actual layers, external deps from code, routes discovered vs documented, confidence score (`documented_nodes / total_nodes`).
+
+**Write:** `<ROOT>/docs/zui/knowledge-base.md`
+
+Sections: Service Purpose · Domain Vocabulary (table) · Architecture Layers (table w/ paths) · External Dependencies (table) · Key Business Concepts · Confidence Notes.
+
+---
+
+## Phase 3 — Build Product Labels
+
+For every node, produce a plain-English label. Zero code terminology.
+
+Label priority (highest wins):
+1. `knowledge_base.route_docs` — documented purpose
+2. `knowledge_base.layers` — layer description
+3. `knowledge_base.domain_vocab` — expand acronyms
+4. `knowledge_base.key_concepts` — business concept lead
+5. Inference: camelCase/snake_case → Title Case, expand abbreviations
+
+Naming conventions: Routes = business action (`POST /orders` → `Place Order`). Functions = what it returns/does. Services = layer role. System = `service_name`.
+
+**Write:** `<ROOT>/docs/zui/productLabels.js` (format in graph-schema.md)
+
+---
+
+## Phase 4 — Write Metadata
+
+For every node, write `product` and `engineer` views. Never leave `description` blank.
+
+**Write:** `<ROOT>/docs/zui/metadata.js` (format in graph-schema.md)
+
+---
+
+## Phase 5 — Architecture Slide Deck (only with `--slides`)
+
+Skip unless `--slides` was passed.
+
+Self-contained Reveal.js 5 HTML (CDN, black theme, highlight plugin). 8–12 slides from actual findings:
+
+Title · What it does (3 bullets) · Architecture layers · System tier · Module tier · Function tier (one call chain) · External deps · Data model (skip if undiscoverable) · Open questions · What's next.
+
+**Write:** `<ROOT>/docs/architecture.html`
+
+---
+
+## Phase 6 — Deploy to ZUI App
+
+**6a — Derive slug:** lowercase dir name, replace `[_. ]` with hyphens, strip non-`[a-z0-9-]`, collapse hyphens, must start with letter.
+
+**6b — Copy files:**
+```bash
+mkdir -p ~/Documents/jasper/zui/src/projects/<slug>
+cp <ROOT>/docs/zui/{graph.json,metadata.js,productLabels.js} ~/Documents/jasper/zui/src/projects/<slug>/
+```
+
+**6c — Upsert `registry.json`:** Read, update existing or append `{ "slug", "name", "repoPath" }`, write back. No duplicates.
+
+**6d — Regenerate `index.js`:** One import block + one `projectData` entry per registered project. Each project imports its own `PRODUCT_TYPE_LABELS` aliased with camelSlug prefix.
+
+**6e — Verify:** `lsof -i :5173 | grep LISTEN`
+
+---
+
+## Phase 7 — Create /docs Index
+
+- `NO_DOCS_FOLDER` set → create `<ROOT>/docs/README.md` with TOC and ZUI viewing instructions
+- `/docs` exists without README → create it
+- `/docs/README.md` exists → append `## ZUI Visualization` section (grep first for idempotency)
+
+---
+
+## Phase 8 — Report
+
+```
+Project:        <service_name> (<slug>)
+Path:           <resolved path>
+Type/Framework: <project_type> / <language> / <framework>
+
+Knowledge:  <N> vocab terms · <N> layers · <N>/<total> routes documented
+Graph:      <N> nodes (1 system · X svc · Y route · Z fn) · <N> edges · depth <max hops>
+Labels:     <N> from docs (<pct>%) · <N> inferred (<pct>%)
+
+Written:    <ROOT>/docs/
+Deployed:   ~/Documents/jasper/zui/src/projects/<slug>/
+```
+
+If server not running: `cd ~/Documents/jasper/zui && npm run dev`
+If README quality Low/None: suggest adding API reference for better labels on re-run.
+
+---
+
+## Constraints
+
+- Never hardcode domain assumptions not found in the project's files.
+- Do not modify `App.jsx`, `layout.js`, `hooks/useHighlight.js`, `components/DetailPanel.jsx` in ZUI shell.
+- Do not overwrite existing non-ZUI docs. ZUI files (`docs/zui/*`, `docs/architecture.html`) overwrite on re-run.
+- Idempotent: no duplicate registry entries, no duplicate README sections.
+- Edge IDs: sequential `e1`, `e2`, ... Node IDs: `<type>:<identifier>`, consistent across all files.
+- Minimum viable: 1 system + 2 service + 3 edges. If unmet, report why.
+
+---
+
+## Error Handling
+
+| Situation | Action |
+|-----------|--------|
+| Path missing | Stop. Ask user. |
+| No routes found | Report scanned files. Ask if pattern needs adjusting. |
+| Framework unrecognized | Read entry file. Infer from imports. |
+| No README/docs | Source-only. Note low confidence. |
+| < 3 edges | Warn shallow. Suggest specific file. |
+| Monorepo | Ask which sub-project. |
+| > 60 nodes | Collapse by prefix. Note in metadata. |
+=== END FILE ===
+
+=== FILE: contexts/extraction-patterns.md ===
+# Extraction Patterns
+
+Load ONLY after framework detection in Phase 1. Read ONLY the section matching the detected framework.
+
+---
+
+## Framework Detection (manifest scan)
+
+| File + content | Framework |
+|----------------|-----------|
+| `package.json` → `@hapi/hapi` | Node/Hapi |
+| `package.json` → `express` | Node/Express |
+| `package.json` → `fastify` | Node/Fastify |
+| `package.json` → `koa` | Node/Koa |
+| `package.json` → `@nestjs/core` | Node/NestJS |
+| `package.json` → `next` | Node/Next.js |
+| `package.json` → `@trpc/server` | Node/tRPC |
+| `go.mod` → `gin-gonic/gin` | Go/Gin |
+| `go.mod` → `labstack/echo` | Go/Echo |
+| `go.mod` → `go-chi/chi` | Go/Chi |
+| `go.mod` (no framework) | Go/net-http |
+| `requirements.txt`/`pyproject.toml` → `django` | Python/Django |
+| `requirements.txt` → `fastapi` | Python/FastAPI |
+| `requirements.txt` → `flask` | Python/Flask |
+| `Cargo.toml` → `actix-web` | Rust/Actix |
+| `Cargo.toml` → `axum` | Rust/Axum |
+| `pom.xml` → `spring-boot` | Java/Spring |
+| `mix.exs` → `phoenix` | Elixir/Phoenix |
+| `Gemfile` → `rails` | Ruby/Rails |
+
+---
+
+## Entry Point Detection
+
+```bash
+# Node.js
+ls src/index.{js,ts} src/server.{js,ts} src/app.{js,ts} src/main.{js,ts} index.{js,ts} server.{js,ts} 2>/dev/null
+# Go
+ls main.go cmd/main.go cmd/*/main.go 2>/dev/null
+# Python
+ls main.py app.py wsgi.py asgi.py manage.py run.py 2>/dev/null
+# Rust
+ls src/main.rs 2>/dev/null
+# Java
+find . -name "*Application.java" -o -name "*Application.kt" 2>/dev/null | head -5
+# Ruby
+ls config.ru app.rb server.rb 2>/dev/null
+```
+
+---
+
+## Route Extraction by Framework
+
+### Node/Hapi
+```bash
+grep -rn '"method"\|method:' src/ --include="*.js" --include="*.ts" | grep -i '"GET\|POST\|PUT\|DELETE\|PATCH\|method:'
+grep -rn '"path":' src/ --include="*.js" --include="*.ts"
+```
+
+### Node/Express, Node/Koa
+```bash
+grep -rn "\.\(get\|post\|put\|delete\|patch\|all\)(" src/ --include="*.js" --include="*.ts" | grep -v "//.*\." | grep "'\|\"" | head -60
+```
+
+### Node/Fastify
+```bash
+grep -rn "fastify\.\(get\|post\|put\|delete\|patch\)\|\.route({" src/ --include="*.js" --include="*.ts" | head -60
+```
+
+### Node/NestJS
+```bash
+grep -rn "@\(Get\|Post\|Put\|Delete\|Patch\|Controller\)(" src/ --include="*.ts" | head -60
+```
+
+### Node/Next.js (App Router)
+```bash
+find . -path "*/app/api/*" -name "route.ts" -o -name "route.js" 2>/dev/null | head -40
+grep -rn "export.*\(GET\|POST\|PUT\|DELETE\|PATCH\)" app/api/ --include="*.ts" --include="*.js" 2>/dev/null | head -40
+```
+
+### Node/Next.js (Pages Router)
+```bash
+find . -path "*/pages/api/*" -name "*.ts" -o -name "*.js" 2>/dev/null | head -40
+```
+
+### Node/tRPC
+```bash
+grep -rn "\.query\|\.mutation\|\.subscription\|router\." src/ --include="*.ts" | grep -v "test\|spec" | head -60
+```
+
+### Python/Django
+```bash
+find . -name "urls.py" | xargs grep -n "path(\|re_path(\|url(" 2>/dev/null | head -60
+```
+
+### Python/FastAPI
+```bash
+grep -rn "@\(app\|router\)\.\(get\|post\|put\|delete\|patch\)(" . --include="*.py" | grep -v test | head -60
+```
+
+### Python/Flask
+```bash
+grep -rn "@\(app\|bp\|blueprint\)\.route\|@.*\.route(" . --include="*.py" | grep -v test | head -60
+```
+
+### Go/Gin
+```bash
+grep -rn "\.\(GET\|POST\|PUT\|DELETE\|PATCH\|Group\)(" . --include="*.go" | grep -v test | head -60
+```
+
+### Go/Chi, Go/net-http
+```bash
+grep -rn "r\.\(Get\|Post\|Put\|Delete\|Patch\|Handle\|HandleFunc\)\|http\.HandleFunc" . --include="*.go" | grep -v test | head -60
+```
+
+### Rust/Axum, Rust/Actix
+```bash
+grep -rn "get\|post\|put\|delete\|Router::new\|\.route(" src/ --include="*.rs" | grep -v test | head -60
+```
+
+### Java/Spring
+```bash
+grep -rn "@\(GetMapping\|PostMapping\|PutMapping\|DeleteMapping\|RequestMapping\)" src/ --include="*.java" | head -60
+```
+
+### Ruby/Rails
+```bash
+grep -rn "get \|post \|put \|delete \|patch \|resources\b\|resource\b" config/routes.rb 2>/dev/null | head -60
+```
+
+---
+
+## Service Layer Detection
+
+```bash
+find . -maxdepth 4 -type d \( \
+  -name "service" -o -name "services" -o -name "business" -o -name "domain" \
+  -o -name "usecase" -o -name "use-case" -o -name "usecases" \
+  -o -name "application" -o -name "logic" -o -name "core" \
+  -o -name "lib" -o -name "internal" -o -name "handlers" -o -name "controllers" \
+\) | grep -v node_modules | grep -v vendor | grep -v .git | head -20
+```
+
+## Data Layer Detection
+
+```bash
+find . -maxdepth 4 -type d \( \
+  -name "repository" -o -name "repositories" -o -name "dal" -o -name "dao" \
+  -o -name "models" -o -name "model" -o -name "db" -o -name "database" \
+  -o -name "store" -o -name "storage" -o -name "persistence" -o -name "infrastructure" \
+\) | grep -v node_modules | grep -v vendor | grep -v .git
+```
+
+## Exported Function Extraction
+
+**Node.js/TS:**
+```bash
+grep -rn "^export \(async \)\?function\|^export const.*=.*async\|^export class\|module\.exports\." <dir>/ --include="*.js" --include="*.ts" | grep -v test | grep -v spec
+```
+
+**Python:**
+```bash
+grep -rn "^def \|^async def \|^class " <dir>/ --include="*.py" | grep -v test
+```
+
+**Go:**
+```bash
+grep -rn "^func [A-Z]" . --include="*.go" | grep -v "_test\.go"
+```
+
+**Java:**
+```bash
+grep -rn "public.*\(void\|String\|List\|Optional\|ResponseEntity\)" src/ --include="*.java" | grep -v test | head -60
+```
+
+**Rust:**
+```bash
+grep -rn "^pub fn \|^pub async fn " src/ --include="*.rs" | grep -v test | head -60
+```
+
+---
+
+## External API / Queue Detection
+
+```bash
+# HTTP clients
+grep -rn "axios\.\|fetch(\|got\.\|ky\.\|superagent\." src/ --include="*.js" --include="*.ts" | grep -v test | head -20
+grep -rn "http\.Get\|http\.Post\|resty\.\|grpc\." . --include="*.go" | grep -v "_test" | head -20
+grep -rn "requests\.\|httpx\.\|urllib\." . --include="*.py" | grep -v test | head -20
+# Queues
+grep -rn "kafka\|rabbitmq\|amqp\|sqs\|pubsub\|nats\|redis.*publish\|bull\." src/ --include="*.js" --include="*.ts" | grep -v test | head -20
+# Cloud SDKs
+grep -rn "aws-sdk\|@aws-sdk\|boto3\|google-cloud\|azure" src/ --include="*.js" --include="*.ts" --include="*.py" | grep -v test | head -20
+```
+
+---
+
+## Import Tracing
+
+```bash
+# Node.js: what does a route file import?
+grep -n "require(\|import " src/routes/<file>
+# Where is a function called?
+grep -rn "<service>.<function>\|<function>(" src/routes/ --include="*.js" --include="*.ts"
+```
+
+Adapt for Python (`from`/`import`), Go (`import` block), Java (`@Autowired`/`@Inject`).
+=== END FILE ===
+
+=== FILE: contexts/graph-schema.md ===
+# Graph Schema + Output File Formats
+
+Node/edge conventions and output file schemas for `graph.json`, `productLabels.js`, and `metadata.js`.
+
+---
+
+## Node ID Conventions
+
+| Type | Pattern | Examples |
+|------|---------|---------|
+| system | `system:<repo-slug>` | `system:payment-api` |
+| service (BL) | `svc:<module-slug>` | `svc:orderService` |
+| service (DL) | `svc:<module-slug>` | `svc:orderRepository` |
+| service (external) | `svc:<vendor-slug>` | `svc:stripe`, `svc:postgres` |
+| service (queue) | `svc:<queue-slug>` | `svc:orderQueue` |
+| route | `route:<METHOD> <path>` | `route:GET /orders/:id` |
+| route (GraphQL) | `route:query <name>` | `route:query getOrder` |
+| route (gRPC) | `route:rpc <name>` | `route:rpc CreateOrder` |
+| function | `fn:<function-name>` | `fn:createOrder` |
+
+Slug rules: lowercase, hyphens for multi-word, no special chars except `:` separator.
+
+---
+
+## graph.json
+
+```json
+{
+  "nodes": [
+    { "id": "system:<slug>", "type": "system", "label": "<name>", "file": "<entry path>" },
+    { "id": "svc:<slug>", "type": "service", "label": "<module>", "file": "<path>" },
+    { "id": "route:<METHOD> <path>", "type": "route", "label": "<METHOD> <path>", "file": "<handler path>" },
+    { "id": "fn:<name>", "type": "function", "label": "<module>.<fn>", "file": "<path>" }
+  ],
+  "edges": [
+    { "id": "e1", "source": "<node-id>", "target": "<node-id>" }
+  ]
+}
+```
+
+---
+
+## productLabels.js
+
+```js
+export const PRODUCT_LABELS = {
+  '<node-id>': '<Plain English Label>',
+}
+
+export const PRODUCT_TYPE_LABELS = {
+  system:   'Service',
+  service:  'Layer',
+  route:    'Endpoint',
+  function: 'Operation',
+}
+```
+
+---
+
+## metadata.js
+
+```js
+export const metadata = {
+  '<node-id>': {
+    product: {
+      title: '<plain-English title>',
+      description: '<1–2 sentences: business purpose>',
+      inputs: '<what caller provides>',
+      outputs: '<what caller gets back>',
+    },
+    engineer: {
+      signature: '<verbatim from source>',
+      file: '<relative path>',
+      notes: '<non-obvious: auth, errors, side effects>',
+      deps: ['<dependency module or node ID>'],
+    },
+  },
+}
+```
+
+---
+
+## knowledge-base.md
+
+Sections: Service Purpose · Domain Vocabulary (table) · Architecture Layers (table w/ paths) · External Dependencies (table) · Key Business Concepts · Confidence Notes (routes N/total, layers N/total, labels inferred N/total).
+=== END FILE ===
+
+=== FILE: contexts/canvas-engine.md ===
+# Canvas Engine Architecture
+
+The ZUI viewer uses an HTML5 `<canvas>` 2D engine (not DOM/CSS transforms).
+Source: `~/Documents/jasper/zui/src/canvas/`
+
+---
+
+## Coordinate spaces
+
+| Space | Description | Conversion |
+|-------|-------------|-----------|
+| World | Infinite virtual layout; objects live here | — |
+| Screen | CSS pixels visible in browser | `sx = wx * zoom + camera.x` |
+
+```
+screenToWorld: wx = (sx - camera.x) / camera.zoom
+               wy = (sy - camera.y) / camera.zoom
+
+worldToScreen: sx = wx * camera.zoom + camera.x
+               sy = wy * camera.zoom + camera.y
+```
+
+`camera.x / camera.y` = screen-pixel offset of world origin. Never physical pixels.
+
+---
+
+## Camera object
+
+```js
+{ x: 0, y: 0, zoom: 1 }
+```
+
+- `x, y` — screen-pixel pan offset
+- `zoom` — scale factor; clamped to `[0.03, 40]`
+
+---
+
+## File map
+
+| File | Role |
+|------|------|
+| `canvasEngine.js` | `CanvasEngine` class — camera, input, RAF, hit-test, lifecycle |
+| `draw.js` | Pure draw functions: `drawGrid`, `drawBox`, `drawEdge` |
+| `textUtils.js` | `truncateToWidth`, `wrapText` — canvas has no CSS ellipsis |
+| `spatialLayout.js` | Layout math — unchanged; outputs `Map<id, {x,y,w,h,depth}>` |
+| `InfiniteCanvas.jsx` | Thin React bridge: mounts canvas, syncs props, DOM overlays |
+
+---
+
+## Render pipeline (per frame)
+
+```
+ctx.setTransform(dpr, 0, 0, dpr, 0, 0)   // reset + DPR
+ctx.clearRect + fillRect                   // clear
+ctx.save()
+ctx.translate(camera.x, camera.y)          // enter world space
+ctx.scale(camera.zoom, camera.zoom)
+  drawGrid()                               // viewport-culled dots
+  drawEdge() × N                           // behind boxes
+  drawBox() × N (depth 0,1 first, 2 last) // system → service → leaf
+ctx.restore()
+```
+
+---
+
+## Input model
+
+| Action | Trigger |
+|--------|---------|
+| Zoom-to-cursor | Mouse wheel (formula: `cam_new = mouse - (mouse - cam_old) * ratio`) |
+| Pan | Spacebar held + left mouse drag |
+| Touch zoom | Pinch (two-finger, same zoom-to-midpoint math) |
+| Single click | Activate node within flow trace |
+| Double click | Set/clear flow trace origin |
+
+---
+
+## Hit-testing (raycasting)
+
+- Convert cursor screen→world via `screenToWorld()`.
+- Iterate `boxes` in descending depth order (leaves first, they win over containers).
+- AABB test: `wx in [box.x, box.x+box.w] && wy in [box.y, box.y+box.h]`.
+- First match wins.
+- Used for hover highlight and click/dblclick dispatch.
+
+---
+
+## Viewport culling (grid)
+
+Grid step in screen pixels: `stepPx = GRID_STEP * zoom`.
+If `stepPx < 6` → skip (dots merge visually).
+World bounds of viewport: `wx0 = (0 - cam.x) / zoom`, `wx1 = (cssW - cam.x) / zoom`.
+Snap loop start: `floor(wx0 / step) * step`.
+Loop iterates only visible dots — O(screen area / density).
+
+---
+
+## High-DPI handling
+
+- `dpr = window.devicePixelRatio`.
+- `canvas.width = cssW * dpr; canvas.height = cssH * dpr` (physical pixels).
+- `canvas.style.width/height = cssW/cssH + 'px'` (CSS display size).
+- `ctx.setTransform(dpr,0,0,dpr,0,0)` at start of each frame — normalises coordinates back to CSS pixels before camera transform.
+
+---
+
+## Animation budget
+
+- `graphView === 'flow'`: runs RAF continuously (dashed edge scroll).
+- Otherwise: `dirty` flag short-circuits rendering — saves battery when idle.
+
+---
+
+## WebGL migration path
+
+All scene data is plain objects (`Map<id, {x,y,w,h,...}>`). The engine is a renderer — swap `draw.js` for a WebGL shader pass. Keep `spatialLayout.js`, `canvasEngine.js` camera/input, and `textUtils.js` (text still needs canvas 2D or a texture atlas).
+=== END FILE ===
+
+=== FILE: scripts/extract-graph.js ===
+#!/usr/bin/env node
+/**
+ * extract-graph.js — Static graph extractor for ZUI visualize skill.
+ *
+ * Uses tree-sitter for accurate AST parsing of JS/TS/CJS repos.
+ * Outputs graph.json to stdout (or --output path) in ZUI graph schema.
+ *
+ * Usage:
+ *   node extract-graph.js <project-root> [--output path/to/graph.json]
+ *
+ * Exit codes:
+ *   0  success
+ *   1  shallow/empty graph
+ *   2  usage error
+ *
+ * Requires (auto-installs on first run):
+ *   tree-sitter, tree-sitter-javascript, tree-sitter-typescript
+ */
+
+'use strict'
+
+const fs   = require('fs')
+const path = require('path')
+const { execSync } = require('child_process')
+
+// ── CLI ──────────────────────────────────────────────────────────────────────
+const args = process.argv.slice(2)
+if (args.length === 0 || args[0] === '--help') {
+  console.error('Usage: node extract-graph.js <project-root> [--output path]')
+  process.exit(2)
+}
+const ROOT     = path.resolve(args[0])
+const outIdx   = args.indexOf('--output')
+const OUT_FILE = outIdx !== -1 ? args[outIdx + 1] : null
+
+if (!fs.existsSync(ROOT)) {
+  console.error(`Path does not exist: ${ROOT}`)
+  process.exit(2)
+}
+
+// ── Detect NODE_PATH roots from package.json scripts ─────────────────────────
+// Reads all script values, extracts NODE_PATH=<val> segments, resolves them
+// relative to ROOT. Enables bare specifier resolution (e.g. require('service')
+// → ROOT/src/service when NODE_PATH=./src).
+function detectNodePaths() {
+  const pkgPath = path.join(ROOT, 'package.json')
+  if (!fs.existsSync(pkgPath)) return []
+  try {
+    const scripts = JSON.parse(fs.readFileSync(pkgPath, 'utf8')).scripts ?? {}
+    const roots = new Set()
+    for (const cmd of Object.values(scripts)) {
+      for (const m of String(cmd).matchAll(/NODE_PATH=([^\s]+)/g)) {
+        const resolved = path.resolve(ROOT, m[1])
+        if (fs.existsSync(resolved)) roots.add(resolved)
+      }
+    }
+    return [...roots]
+  } catch (_) { return [] }
+}
+
+const NODE_PATH_ROOTS = detectNodePaths()
+if (NODE_PATH_ROOTS.length > 0)
+  process.stderr.write(`NODE_PATH roots: ${NODE_PATH_ROOTS.map(r => path.relative(ROOT, r)).join(', ')}\n`)
+
+// ── Auto-install deps (one-time, local to scripts/) ──────────────────────────
+function ensureDeps() {
+  const SCRIPT_DIR = __dirname
+  const NM         = path.join(SCRIPT_DIR, 'node_modules')
+  const needed     = ['tree-sitter', 'tree-sitter-javascript', 'tree-sitter-typescript']
+  const missing    = needed.filter(p => !fs.existsSync(path.join(NM, p)))
+  if (missing.length > 0) {
+    process.stderr.write(`Installing tree-sitter deps (one-time)...\n`)
+    execSync(
+      `npm install --prefix "${SCRIPT_DIR}" --save-exact --legacy-peer-deps ${missing.join(' ')}`,
+      { stdio: ['ignore', 'inherit', 'inherit'] }
+    )
+  }
+  return NM
+}
+
+const NM_DIR     = ensureDeps()
+const Parser     = require(path.join(NM_DIR, 'tree-sitter'))
+const JavaScript = require(path.join(NM_DIR, 'tree-sitter-javascript'))
+const TSModule   = require(path.join(NM_DIR, 'tree-sitter-typescript'))
+const TypeScript = TSModule.typescript || TSModule
+
+const jsParser = new Parser(); jsParser.setLanguage(JavaScript)
+const tsParser = new Parser(); tsParser.setLanguage(TypeScript)
+
+function parseSource(src, ext) {
+  try {
+    return (ext === '.ts' || ext === '.tsx' ? tsParser : jsParser).parse(src)
+  } catch (_) { return null }
+}
+
+// ── File walker ───────────────────────────────────────────────────────────────
+const SKIP_DIRS = new Set(['node_modules','.git','dist','build','coverage','.nyc_output','vendor','target'])
+const SRC_EXTS  = new Set(['.js','.mjs','.cjs','.ts','.tsx'])
+
+function walkFiles(dir) {
+  const out = []
+  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+    if (e.isDirectory() && !SKIP_DIRS.has(e.name)) out.push(...walkFiles(path.join(dir, e.name)))
+    else if (e.isFile() && SRC_EXTS.has(path.extname(e.name))) out.push(path.join(dir, e.name))
+  }
+  return out
+}
+
+// ── AST utilities ────────────────────────────────────────────────────────────
+function* walk(node) { yield node; for (const c of node.children) yield* walk(c) }
+const txt  = (node, src) => src.slice(node.startIndex, node.endIndex)
+const kid  = (node, type) => node.children.find(c => c.type === type) ?? null
+const kids = (node, type) => node.children.filter(c => c.type === type)
+
+// ── Const binding resolver ────────────────────────────────────────────────────
+// Collects top-level const/let/var x = 'literal' bindings so we can resolve
+// string concatenations like `v2 + path` where v2='/v2' and path='/api/foo'.
+function buildBindings(tree, src) {
+  const bindings = new Map()
+  for (const node of walk(tree.rootNode)) {
+    if (node.type !== 'lexical_declaration' && node.type !== 'variable_declaration') continue
+    for (const decl of kids(node, 'variable_declarator')) {
+      const nameNode = kid(decl, 'identifier')
+      const val      = decl.children[decl.children.length - 1]
+      if (!nameNode || !val) continue
+      const name = txt(nameNode, src)
+      if (val.type === 'string') {
+        bindings.set(name, txt(val, src).replace(/^['"`]|['"`]$/g, ''))
+      } else if (val.type === 'template_string') {
+        bindings.set(name, txt(val, src).replace(/^`|`$/g, ''))
+      }
+    }
+  }
+  return bindings
+}
+
+// Evaluate a path expression node to a string, resolving identifier bindings.
+// Handles: string literals, identifiers, binary (+) concatenation.
+function evalPathNode(node, src, bindings) {
+  if (!node) return null
+  if (node.type === 'string') return txt(node, src).replace(/^['"`]|['"`]$/g, '')
+  if (node.type === 'template_string') return txt(node, src).replace(/^`|`$/g, '')
+  if (node.type === 'identifier') return bindings.get(txt(node, src)) ?? null
+  if (node.type === 'binary_expression') {
+    const [left, , right] = node.children
+    const l = evalPathNode(left,  src, bindings)
+    const r = evalPathNode(right, src, bindings)
+    if (l !== null && r !== null) return l + r
+    if (l !== null) return l
+    if (r !== null) return r
+  }
+  return null
+}
+
+// ── Bare specifier helpers (NODE_PATH resolution) ────────────────────────────
+// Returns true if the specifier is not a relative path, not a node_modules
+// package (starts with a letter/@ but has no scope slash or is a known
+// project-internal name resolvable via NODE_PATH roots).
+function isNodePathSpec(spec) {
+  if (!spec || spec.startsWith('.') || spec.startsWith('/')) return false
+  if (!NODE_PATH_ROOTS.length) return false
+  // Skip obvious npm packages: scoped (@foo/bar) or single bare names with no
+  // slash that don't resolve under any node-path root.
+  const topSegment = spec.split('/')[0]
+  return NODE_PATH_ROOTS.some(r => fs.existsSync(path.join(r, topSegment)))
+}
+
+// ── Require/import extractor ─────────────────────────────────────────────────
+function extractRequires(tree, src) {
+  const out = []
+  for (const node of walk(tree.rootNode)) {
+    if (node.type === 'call_expression') {
+      const fn = node.children[0]
+      if (fn && txt(fn, src) === 'require') {
+        const argsNode = kid(node, 'arguments')
+        const strNode  = argsNode?.children.find(c => c.type === 'string')
+        if (strNode) {
+          const spec = txt(strNode, src).replace(/^['"]|['"]$/g, '')
+          if (spec.startsWith('.') || isNodePathSpec(spec)) out.push(spec)
+        }
+      }
+    }
+    if (node.type === 'import_statement') {
+      const strNode = node.children.find(c => c.type === 'string')
+      if (strNode) {
+        const spec = txt(strNode, src).replace(/^['"]|['"]$/g, '')
+        if (spec.startsWith('.') || isNodePathSpec(spec)) out.push(spec)
+      }
+    }
+  }
+  return [...new Set(out)]
+}
+
+// ── Function/method extractor ─────────────────────────────────────────────────
+function extractFunctions(tree, src, relFile) {
+  const out = []
+
+  for (const node of walk(tree.rootNode)) {
+    // Named function declarations
+    if (node.type === 'function_declaration' || node.type === 'generator_function_declaration') {
+      const nameNode = kid(node, 'identifier')
+      if (nameNode) out.push({ name: txt(nameNode, src), file: relFile, line: node.startPosition.row + 1 })
+    }
+
+    // const/let/var x = function / arrow
+    if (node.type === 'lexical_declaration' || node.type === 'variable_declaration') {
+      for (const decl of kids(node, 'variable_declarator')) {
+        const nameNode = kid(decl, 'identifier')
+        const val      = decl.children.find(c =>
+          ['function', 'arrow_function', 'generator_function'].includes(c.type)
+        )
+        if (nameNode && val) out.push({ name: txt(nameNode, src), file: relFile, line: node.startPosition.row + 1 })
+      }
+    }
+
+    // Class methods
+    if (node.type === 'method_definition') {
+      const nameNode = node.children.find(c => c.type === 'property_identifier' || c.type === 'identifier')
+      if (!nameNode) continue
+      const methodName = txt(nameNode, src)
+      if (['constructor','get','set'].includes(methodName)) continue
+
+      let clsNode = node.parent
+      while (clsNode && clsNode.type !== 'class_declaration' && clsNode.type !== 'class') clsNode = clsNode.parent
+      const clsName = clsNode
+        ? (() => { const id = clsNode.children.find(c => c.type === 'identifier'); return id ? txt(id, src) : null })()
+        : null
+
+      out.push({
+        name:       clsName ? `${clsName}.${methodName}` : methodName,
+        simpleName: methodName,
+        className:  clsName,
+        file:       relFile,
+        line:       node.startPosition.row + 1,
+      })
+    }
+  }
+
+  return out
+}
+
+// ── Route extractor ───────────────────────────────────────────────────────────
+const HTTP_VERBS = new Set(['get','post','put','patch','delete','options','head'])
+
+function extractRoutes(tree, src, relFile, bindings) {
+  const out = []
+
+  for (const node of walk(tree.rootNode)) {
+    if (node.type !== 'call_expression') continue
+    const callee = node.children[0]
+    if (!callee) continue
+
+    // Express: router.get('/path', ...) / app.post('/path', ...)
+    if (callee.type === 'member_expression') {
+      const prop = callee.children.find(c => c.type === 'property_identifier')
+      if (!prop) continue
+      const verb = txt(prop, src).toLowerCase()
+
+      if (HTTP_VERBS.has(verb)) {
+        const argsNode = kid(node, 'arguments')
+        if (!argsNode) continue
+        const pathNode = argsNode.children.find(c =>
+          c.type === 'string' || c.type === 'template_string' ||
+          c.type === 'identifier' || c.type === 'binary_expression'
+        )
+        const routePath = evalPathNode(pathNode, src, bindings)
+        if (routePath && routePath.startsWith('/')) {
+          out.push({ method: verb.toUpperCase(), path: routePath, file: relFile, line: node.startPosition.row + 1 })
+        }
+      }
+
+      // Hapi: server.route({ method, path, ... })
+      if (verb === 'route') {
+        const argsNode = kid(node, 'arguments')
+        if (!argsNode) continue
+        for (const argNode of argsNode.children) {
+          const configs = argNode.type === 'array' ? kids(argNode, 'object') : [argNode]
+          for (const obj of configs) {
+            if (obj.type !== 'object') continue
+            let method = null, routePath = null
+            for (const pair of kids(obj, 'pair')) {
+              const keyNode = pair.children.find(c => c.type === 'property_identifier' || c.type === 'string')
+              const valNode = pair.children[pair.children.length - 1]
+              if (!keyNode || !valNode) continue
+              const key = txt(keyNode, src).replace(/^['"]|['"]$/g, '')
+              if (key === 'method') {
+                const resolved = evalPathNode(valNode, src, bindings)
+                if (resolved) method = resolved.toUpperCase()
+                else method = txt(valNode, src).replace(/^['"]|['"]$/g, '').toUpperCase()
+              }
+              if (key === 'path') {
+                routePath = evalPathNode(valNode, src, bindings)
+              }
+            }
+            if (method && routePath && routePath.startsWith('/')) {
+              out.push({ method, path: routePath, file: relFile, line: node.startPosition.row + 1 })
+            }
+          }
+        }
+      }
+    }
+  }
+
+  return out
+}
+
+// ── Call name extractor ───────────────────────────────────────────────────────
+function extractCallNames(tree, src) {
+  const names = new Set()
+  for (const node of walk(tree.rootNode)) {
+    if (node.type !== 'call_expression') continue
+    const callee = node.children[0]
+    if (!callee) continue
+    if (callee.type === 'identifier') names.add(txt(callee, src))
+    else if (callee.type === 'member_expression') {
+      const prop = callee.children.find(c => c.type === 'property_identifier')
+      if (prop) names.add(txt(prop, src))
+    }
+  }
+  return [...names]
+}
+
+// ── Module resolver ───────────────────────────────────────────────────────────
+const EXTS = ['.js', '.ts', '.mjs', '.cjs']
+function tryResolveBase(base) {
+  // File candidates first (never return a bare directory path)
+  const fileCandidates = [...EXTS.map(e => base + e),
+                          path.join(base, 'index.js'), path.join(base, 'index.ts')]
+  for (const c of fileCandidates) if (fs.existsSync(c)) return path.relative(ROOT, c)
+  return null
+}
+
+function resolveRequire(fromFile, specifier) {
+  if (specifier.startsWith('.')) {
+    // Relative specifier — resolve from the file's directory
+    const base = path.resolve(path.dirname(path.join(ROOT, fromFile)), specifier)
+    return tryResolveBase(base)
+  }
+  // Bare specifier — try each NODE_PATH root
+  for (const npRoot of NODE_PATH_ROOTS) {
+    const result = tryResolveBase(path.join(npRoot, specifier))
+    if (result) return result
+  }
+  return null
+}
+
+// ── Slugify ───────────────────────────────────────────────────────────────────
+function slugify(s) {
+  return s.replace(/([A-Z])/g, m => '-'+m.toLowerCase())
+          .replace(/[^a-z0-9-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '')
+}
+
+// ── Infer services from directory structure ───────────────────────────────────
+// Strategy: group files by their immediate parent directory. Directories that
+// have at least one non-index source file become service nodes. Directories that
+// only contain index.js re-exports are transparent pass-throughs.
+function inferServices(allRelFiles) {
+  const dirFiles = new Map()
+  for (const f of allRelFiles) {
+    const dir = path.dirname(f)
+    if (!dirFiles.has(dir)) dirFiles.set(dir, [])
+    dirFiles.get(dir).push(f)
+  }
+
+  // Score each directory: prefer deeper paths with actual logic
+  const services = []
+  for (const [dir, files] of dirFiles) {
+    // Skip root and single-level dirs (too broad)
+    const depth = dir.split('/').filter(Boolean).length
+    if (depth < 1) continue
+    // Skip root, single-segment dirs (too broad), test dirs, and generated output
+    if (dir === '.') continue
+    if (!/\//.test(dir)) continue  // e.g., bare "src" — needs at least one sub-level
+    if (/\b(test|spec|__tests__|fixtures|mocks)\b/i.test(dir)) continue
+    if (dir.startsWith('docs/')) continue
+
+    const logicFiles = files.filter(f => {
+      const base = path.basename(f, path.extname(f))
+      return base !== 'index' && !base.startsWith('.')
+    })
+    if (logicFiles.length === 0) continue
+
+    const name = path.basename(dir)
+    services.push({ id: `svc:${slugify(name)}`, label: name, dir, files })
+  }
+
+  // Deduplicate: if a child dir and parent dir both qualify, prefer the child
+  // (more specific). Remove parents that are supersets of children.
+  const childDirs = new Set(services.map(s => s.dir))
+  return services.filter(s => {
+    const parts = s.dir.split('/')
+    // If any ancestor dir is also a service, this one wins (keep it), drop parent
+    for (let i = 1; i < parts.length; i++) {
+      const ancestor = parts.slice(0, i).join('/')
+      if (childDirs.has(ancestor) && ancestor !== s.dir) {
+        // Keep the more specific child; the parent will be filtered later
+        // by checking: if I am an ancestor of another service, am I redundant?
+      }
+    }
+    return true
+  })
+}
+
+// ── Main ──────────────────────────────────────────────────────────────────────
+process.stderr.write(`Extracting: ${ROOT}\n`)
+
+const allAbsFiles = walkFiles(ROOT)
+process.stderr.write(`Parsing ${allAbsFiles.length} source files...\n`)
+
+// Parse every file
+const fileData = new Map() // relFile → { fns, routes, requires, calls, bindings }
+for (const absFile of allAbsFiles) {
+  const relFile = path.relative(ROOT, absFile)
+  let src
+  try { src = fs.readFileSync(absFile, 'utf8') } catch (_) { continue }
+  const tree = parseSource(src, path.extname(absFile))
+  if (!tree) continue
+  const bindings = buildBindings(tree, src)
+  fileData.set(relFile, {
+    fns:      extractFunctions(tree, src, relFile),
+    routes:   extractRoutes(tree, src, relFile, bindings),
+    requires: extractRequires(tree, src),
+    calls:    extractCallNames(tree, src),
+  })
+}
+
+// ── Read package.json for system name ────────────────────────────────────────
+const pkgPath = path.join(ROOT, 'package.json')
+const pkg     = fs.existsSync(pkgPath) ? JSON.parse(fs.readFileSync(pkgPath, 'utf8')) : {}
+const slug    = slugify(pkg.name || path.basename(ROOT))
+const sysName = pkg.name || path.basename(ROOT)
+const sysId   = `system:${slug}`
+
+const entryFile = ['src/index.js','index.js','src/server.js','server.js','src/app.js','app.js']
+  .find(c => fs.existsSync(path.join(ROOT, c))) || 'index.js'
+
+// ── Build service list ────────────────────────────────────────────────────────
+const services    = inferServices([...fileData.keys()])
+const fileSvcMap  = new Map() // relFile → svcId
+const dirSvcMap   = new Map() // dir → svcId (for index.js pass-through resolution)
+for (const svc of services) {
+  for (const f of svc.files) fileSvcMap.set(f, svc.id)
+  dirSvcMap.set(svc.dir, svc.id)
+}
+
+// ── Build graph ───────────────────────────────────────────────────────────────
+const nodes   = []
+const edges   = []
+const nodeIds = new Set()
+let   edgeN   = 0
+
+const addNode = n => { if (!nodeIds.has(n.id)) { nodes.push(n); nodeIds.add(n.id) } }
+const addEdge = (src, tgt) => {
+  if (src !== tgt && !edges.find(e => e.source === src && e.target === tgt))
+    edges.push({ id: `e${++edgeN}`, source: src, target: tgt })
+}
+
+addNode({ id: sysId, type: 'system', label: sysName, file: entryFile })
+
+for (const svc of services) {
+  addNode({ id: svc.id, type: 'service', label: svc.label, file: svc.dir })
+  addEdge(sysId, svc.id)
+}
+
+// Routes
+const routeList = [] // { id, file }
+for (const [relFile, data] of fileData) {
+  for (const r of data.routes) {
+    const id = `route:${r.method} ${r.path}`
+    if (!nodeIds.has(id)) {
+      addNode({ id, type: 'route', label: `${r.method} ${r.path}`, file: relFile })
+      routeList.push({ id, file: relFile })
+      const svcId = fileSvcMap.get(relFile)
+      if (svcId) addEdge(svcId, id)
+    }
+  }
+}
+
+// Functions (indexed by all name variants for call resolution)
+const fnById   = new Map() // simpleName / fullName → nodeId
+for (const [relFile, data] of fileData) {
+  for (const fn of data.fns) {
+    const id = `fn:${fn.simpleName || fn.name}`
+    if (!fnById.has(fn.name)) fnById.set(fn.name, id)
+    if (fn.simpleName && !fnById.has(fn.simpleName)) fnById.set(fn.simpleName, id)
+    if (!nodeIds.has(id)) {
+      addNode({ id, type: 'function', label: fn.name, file: relFile })
+      const svcId = fileSvcMap.get(relFile)
+      if (svcId) addEdge(svcId, id)
+    }
+  }
+}
+
+// ── Wire edges ────────────────────────────────────────────────────────────────
+// Route → fn: route file calls a function name
+for (const { id: routeId, file: routeFile } of routeList) {
+  for (const callName of (fileData.get(routeFile)?.calls ?? [])) {
+    const fnId = fnById.get(callName)
+    if (fnId && fnId !== routeId) addEdge(routeId, fnId)
+  }
+}
+
+// fn → fn / fn → svc: for each file, connect its functions to what they call
+// and to services they import
+for (const [relFile, data] of fileData) {
+  const thisSvc = fileSvcMap.get(relFile)
+
+  // Imported service targets
+  const importedSvcs = new Set()
+  for (const spec of data.requires) {
+    const resolved = resolveRequire(relFile, spec)
+    if (!resolved) continue
+    // Direct file hit
+    let targetSvc = fileSvcMap.get(resolved)
+    // If resolved to an index.js, look up the directory instead — index files
+    // are transparent pass-throughs and not in fileSvcMap directly
+    if (!targetSvc && path.basename(resolved) === 'index.js') {
+      const dir = path.dirname(resolved)
+      targetSvc = dirSvcMap.get(dir)
+    }
+    if (targetSvc && targetSvc !== thisSvc) importedSvcs.add(targetSvc)
+  }
+
+  for (const fn of data.fns) {
+    const fnId = fnById.get(fn.simpleName || fn.name)
+    if (!fnId) continue
+
+    // Calls to other functions
+    for (const callName of data.calls) {
+      if (callName === (fn.simpleName || fn.name)) continue
+      const calledId = fnById.get(callName)
+      if (calledId && calledId !== fnId) addEdge(fnId, calledId)
+    }
+
+    // Cross-service imports: fn → svc
+    for (const svcId of importedSvcs) addEdge(fnId, svcId)
+  }
+}
+
+// ── Prune unconnected nodes ───────────────────────────────────────────────────
+const connected = new Set([sysId])
+for (const e of edges) { connected.add(e.source); connected.add(e.target) }
+const finalNodes = nodes.filter(n => connected.has(n.id))
+
+// ── Cap nodes: all system/service/route nodes kept; top-degree functions fill
+// remaining slots up to MAX_FN_NODES ─────────────────────────────────────────
+const MAX_FN_NODES = 40
+const degree = new Map()
+for (const e of edges) {
+  degree.set(e.source, (degree.get(e.source) ?? 0) + 1)
+  degree.set(e.target, (degree.get(e.target) ?? 0) + 1)
+}
+const nonFns = finalNodes.filter(n => n.type !== 'function')
+const fns    = finalNodes.filter(n => n.type === 'function')
+                         .sort((a, b) => (degree.get(b.id) ?? 0) - (degree.get(a.id) ?? 0))
+                         .slice(0, MAX_FN_NODES)
+const trimmedNodes = [...nonFns, ...fns]
+if (trimmedNodes.length < finalNodes.length) {
+  process.stderr.write(`Trimming functions to top ${MAX_FN_NODES} by degree (was ${finalNodes.length}, now ${trimmedNodes.length})\n`)
+  finalNodes.splice(0, finalNodes.length, ...trimmedNodes)
+}
+
+const keepIds    = new Set(finalNodes.map(n => n.id))
+const finalEdges = edges.filter(e => keepIds.has(e.source) && keepIds.has(e.target))
+
+// ── Stats ─────────────────────────────────────────────────────────────────────
+const tc = { system: 0, service: 0, route: 0, function: 0 }
+for (const n of finalNodes) tc[n.type] = (tc[n.type] ?? 0) + 1
+process.stderr.write(
+  `Graph: ${finalNodes.length} nodes (${tc.system} system · ${tc.service} svc · ${tc.route} route · ${tc.function} fn) · ${finalEdges.length} edges\n`
+)
+if (finalNodes.length < 4 || finalEdges.length < 3)
+  process.stderr.write(`WARNING: Shallow graph — check route/require patterns.\n`)
+
+// ── Output ────────────────────────────────────────────────────────────────────
+const graph = { nodes: finalNodes, edges: finalEdges }
+const json  = JSON.stringify(graph, null, 2)
+
+if (OUT_FILE) {
+  fs.mkdirSync(path.dirname(OUT_FILE), { recursive: true })
+  fs.writeFileSync(OUT_FILE, json)
+  process.stderr.write(`Written: ${OUT_FILE}\n`)
+} else {
+  process.stdout.write(json + '\n')
+}
+=== END FILE ===
+
+=== FILE: scripts/package.json ===
+{
+  "dependencies": {
+    "tree-sitter": "0.25.0",
+    "tree-sitter-javascript": "0.25.0",
+    "tree-sitter-typescript": "0.23.2"
+  }
+}
+=== END FILE ===
