@@ -1,0 +1,1063 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>zui-visualize · checkout-service</title>
+<style>
+:root{
+  --canvas-bg:#FAFAFB;
+  --dot-grid:#E4E6EB;
+  --accent:#4262FF;
+  --accent-soft:#EDF0FF;
+  --text-primary:#1A1A2E;
+  --text-secondary:#6B6F7B;
+  --card-bg:#FFFFFF;
+  --card-border:#E0E2E7;
+  --shadow-soft:0 2px 8px rgba(20,20,43,.08);
+  --shadow-lifted:0 8px 24px rgba(20,20,43,.16);
+  --snap-guide:#FF3399;
+  --note-yellow:#FFF2A8; --note-pink:#FFC9DD; --note-blue:#BFE0FF;
+  --note-green:#C3F0CB; --note-orange:#FFD8A8; --note-purple:#E0D1FF;
+  --font:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;overflow:hidden;font-family:var(--font);color:var(--text-primary)}
+#app{display:flex;height:100%;width:100%}
+
+/* ---------- canvas ---------- */
+#canvasWrap{position:relative;flex:1;min-width:0;background-color:var(--canvas-bg);
+  background-image:radial-gradient(circle,var(--dot-grid) 1px,transparent 1px);
+  background-size:24px 24px;overflow:hidden;touch-action:none;transition:background-color .2s}
+#canvasWrap.grid-faded{background-image:none}
+#board{position:absolute;inset:0;width:100%;height:100%;cursor:grab;display:block}
+#board.panning{cursor:grabbing}
+#board.hand{cursor:grab}
+#board.dragging-node{cursor:grabbing}
+
+/* ---------- nodes ---------- */
+.node{cursor:pointer}
+.node .card-g{transform-box:fill-box;transform-origin:center;
+  transition:transform .12s ease,filter .12s ease;
+  filter:drop-shadow(0 2px 8px rgba(20,20,43,.08))}
+.node:hover .card-g,.node.lift .card-g{transform:scale(1.02);
+  filter:drop-shadow(0 8px 24px rgba(20,20,43,.16))}
+.node .card{fill:var(--card-bg);stroke:var(--card-border);stroke-width:1}
+.node .stripe{pointer-events:none}
+.node .lbl{font:500 13px var(--font);fill:var(--text-primary);pointer-events:none}
+.node .sub{font:400 10px var(--font);fill:var(--text-secondary);pointer-events:none}
+.node .sel-outline{fill:none;stroke:var(--accent);stroke-width:2;display:none;pointer-events:none}
+.node .handle{fill:var(--accent);stroke:#fff;stroke-width:1;display:none;pointer-events:none}
+.node.selected .sel-outline,.node.selected .handle{display:block}
+.node .chev{fill:none;stroke:var(--text-secondary);stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round;pointer-events:none}
+
+/* ---------- edges ---------- */
+.edge{fill:none;pointer-events:none;transition:stroke .12s,opacity .12s}
+.e-import{stroke:var(--text-secondary);stroke-width:1.5;opacity:.5}
+.e-infra{stroke:var(--text-secondary);stroke-width:1.5;opacity:.6}
+.e-cross{stroke:var(--text-secondary);stroke-width:1.5;opacity:.55;stroke-dasharray:6 5}
+.e-pipe{stroke:var(--accent);stroke-width:1.7;opacity:.75}
+.edge.hl{stroke:var(--accent);stroke-width:2;opacity:1}
+
+/* ---------- frames ---------- */
+.frame-rect{stroke-dasharray:5 5;stroke-width:1;cursor:grab}
+.frame-pill{cursor:grab}
+.frame-pill text{font:600 12px var(--font);letter-spacing:.04em;text-transform:uppercase;
+  fill:var(--text-primary);pointer-events:none}
+.frame.lift .frame-rect{stroke-dasharray:none}
+
+/* ---------- focus / search dimming ---------- */
+svg.focus .node:not(.rel):not(.selected){opacity:.25}
+svg.focus .edge:not(.hl){opacity:.12}
+svg.focus .frame{opacity:.45}
+svg.searching .node:not(.match){opacity:.3}
+svg.searching .edge{opacity:.12}
+svg.searching .frame{opacity:.45}
+svg.searching .node.match .card-g{filter:drop-shadow(0 0 6px rgba(66,98,255,.85)) drop-shadow(0 2px 8px rgba(20,20,43,.08))}
+
+/* ---------- snap guides ---------- */
+.guide{stroke:var(--snap-guide);stroke-width:1;vector-effect:non-scaling-stroke;pointer-events:none}
+
+/* ---------- floating chrome ---------- */
+.chrome{position:absolute;z-index:10;font-family:var(--font)}
+.pill{background:var(--card-bg);box-shadow:var(--shadow-lifted);border-radius:20px;
+  display:flex;align-items:center}
+.pill-soft{box-shadow:var(--shadow-soft)}
+button.icon-btn{appearance:none;border:0;background:transparent;width:36px;height:36px;
+  border-radius:12px;display:flex;align-items:center;justify-content:center;cursor:pointer;
+  color:var(--text-primary)}
+button.icon-btn:hover{background:var(--accent-soft)}
+button.icon-btn.active{background:var(--accent-soft);color:var(--accent)}
+button.icon-btn:focus-visible,input:focus-visible,.lyr:focus-within{outline:2px solid var(--accent);outline-offset:1px}
+button.icon-btn svg{width:18px;height:18px}
+
+#boardChip{top:16px;left:16px;padding:8px 14px 8px 10px;gap:8px;border-radius:14px}
+#boardChip .dot{width:10px;height:10px;border-radius:50%;background:var(--accent);flex:0 0 auto}
+#boardChip .t{font-size:13px;font-weight:600;white-space:nowrap}
+#boardChip .t span{color:var(--text-secondary);font-weight:400}
+
+#searchWrap{top:62px;left:16px;padding:4px 10px 4px 12px;border-radius:20px;gap:6px}
+#searchWrap svg{width:15px;height:15px;color:var(--text-secondary);flex:0 0 auto}
+#search{border:0;outline:0;background:transparent;font:400 13px var(--font);
+  color:var(--text-primary);width:190px;padding:7px 0}
+#search::placeholder{color:var(--text-secondary)}
+#searchClear{display:none}
+#searchWrap.has-q #searchClear{display:flex;width:24px;height:24px;border-radius:8px}
+
+#toolbar{left:16px;top:50%;transform:translateY(-50%);flex-direction:column;
+  padding:8px 6px;gap:8px;border-radius:20px}
+
+#zoomCtl{bottom:16px;right:16px;padding:4px 6px;gap:2px}
+#zoomPct{appearance:none;border:0;background:transparent;font:500 12px var(--font);
+  color:var(--text-primary);min-width:46px;height:32px;border-radius:10px;cursor:pointer}
+#zoomPct:hover{background:var(--accent-soft)}
+
+#layersCtl{bottom:16px;left:16px;padding:8px 14px;gap:14px;border-radius:16px}
+.lyr{display:flex;align-items:center;gap:6px;font:500 12px var(--font);cursor:pointer;
+  color:var(--text-secondary);user-select:none}
+.lyr input{accent-color:var(--accent);width:14px;height:14px;cursor:pointer;margin:0}
+.lyr.on{color:var(--text-primary)}
+
+#minimap{top:16px;right:16px;width:180px;height:120px;border-radius:12px;overflow:hidden;
+  background:var(--card-bg);box-shadow:var(--shadow-soft);cursor:pointer;padding:0}
+#minimap svg{display:block;width:100%;height:100%}
+#mmView{fill:rgba(66,98,255,.06);stroke:var(--accent);stroke-width:1.5}
+
+#hint{bottom:64px;left:50%;transform:translateX(-50%);background:var(--card-bg);
+  box-shadow:var(--shadow-soft);border-radius:14px;padding:8px 16px;
+  font:400 12px var(--font);color:var(--text-secondary);pointer-events:none;
+  transition:opacity .6s ease;white-space:nowrap}
+#hint.gone{opacity:0}
+
+/* ---------- side panel (push layout) ---------- */
+#panel{width:0;flex:0 0 auto;background:var(--card-bg);box-shadow:var(--shadow-lifted);
+  overflow:hidden;transition:width .2s ease;display:flex;flex-direction:column;z-index:20}
+#panel.open{width:320px}
+#panelInner{width:320px;padding:18px 18px 24px;overflow-y:auto;height:100%}
+#panelHead{display:flex;align-items:flex-start;justify-content:space-between;gap:8px}
+#panelTitle{font:600 15px var(--font);line-height:1.3;word-break:break-word}
+#panelClose{flex:0 0 auto}
+.badge{display:inline-block;font:600 10px var(--font);letter-spacing:.05em;text-transform:uppercase;
+  padding:3px 8px;border-radius:8px;margin-top:8px;color:var(--text-primary)}
+.pathline{font:400 11px var(--font);color:var(--text-secondary);margin-top:8px;word-break:break-all}
+.metrics{display:flex;gap:8px;margin-top:14px;flex-wrap:wrap}
+.metric{background:var(--canvas-bg);border:1px solid var(--card-border);border-radius:10px;
+  padding:8px 10px;min-width:62px}
+.metric .v{font:600 15px var(--font)}
+.metric .k{font:400 10px var(--font);color:var(--text-secondary);margin-top:1px}
+.sect{font:600 11px var(--font);letter-spacing:.05em;text-transform:uppercase;
+  color:var(--text-secondary);margin:18px 0 8px}
+.kv{display:flex;justify-content:space-between;gap:10px;font:400 12px var(--font);
+  padding:5px 0;border-bottom:1px solid var(--canvas-bg)}
+.kv .k{color:var(--text-secondary);flex:0 0 auto}
+.kv .v{text-align:right;word-break:break-word}
+.linkrow{display:flex;align-items:center;gap:8px;padding:7px 8px;border-radius:10px;
+  cursor:pointer;font:400 12px var(--font)}
+.linkrow:hover{background:var(--accent-soft)}
+.linkrow .sw{width:8px;height:8px;border-radius:3px;flex:0 0 auto}
+.linkrow .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.linkrow .rel{font-size:10px;color:var(--text-secondary);flex:0 0 auto}
+.empty{font:400 12px var(--font);color:var(--text-secondary);padding:4px 0}
+
+@media (max-width:640px){
+  #panel{position:absolute;right:0;top:0;bottom:0;box-shadow:var(--shadow-lifted)}
+  #panel.open{width:min(320px,88vw)}
+  #panelInner{width:min(320px,88vw)}
+  #minimap{width:130px;height:88px}
+  #search{width:130px}
+  #hint{white-space:normal;text-align:center;max-width:80vw}
+}
+@media (prefers-reduced-motion:reduce){
+  *{transition:none!important}
+}
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="canvasWrap">
+    <svg id="board" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <marker id="arrowGray" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+          <path d="M0.5,0.8 L7,4 L0.5,7.2" fill="none" stroke="#6B6F7B" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+        </marker>
+        <marker id="arrowAccent" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+          <path d="M0.5,0.8 L7,4 L0.5,7.2" fill="none" stroke="#4262FF" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+        </marker>
+      </defs>
+      <g id="viewport">
+        <g id="framesG"></g>
+        <g id="edgesG"></g>
+        <g id="nodesG"></g>
+        <g id="guidesG"></g>
+      </g>
+    </svg>
+
+    <!-- floating chrome -->
+    <div id="boardChip" class="chrome pill pill-soft">
+      <div class="dot"></div>
+      <div class="t">checkout-service <span>· architecture board</span></div>
+    </div>
+
+    <div id="searchWrap" class="chrome pill pill-soft">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+      <input id="search" type="text" placeholder="Search files, resources…" autocomplete="off" spellcheck="false">
+      <button id="searchClear" class="icon-btn" title="Clear search" aria-label="Clear search">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
+    </div>
+
+    <div id="toolbar" class="chrome pill">
+      <button class="icon-btn active" id="toolSelect" title="Select (V)" aria-label="Select tool">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M5 3l14 8-6.5 1.5L9 19 5 3z"/></svg>
+      </button>
+      <button class="icon-btn" id="toolHand" title="Pan (H)" aria-label="Pan tool">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 11V7.5a1.5 1.5 0 0 0-3 0V11m0-4.5v-1a1.5 1.5 0 0 0-3 0V11m0-5a1.5 1.5 0 0 0-3 0v7.5L7.2 11.6a1.6 1.6 0 0 0-2.4 2.1l4 6A5 5 0 0 0 13 22h1a5 5 0 0 0 5-5v-6a1.5 1.5 0 0 0-1-1.4z"/></svg>
+      </button>
+      <button class="icon-btn" id="toolFit" title="Zoom to fit (F)" aria-label="Zoom to fit">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9V5a1 1 0 0 1 1-1h4M15 4h4a1 1 0 0 1 1 1v4M20 15v4a1 1 0 0 1-1 1h-4M9 20H5a1 1 0 0 1-1-1v-4"/><rect x="9" y="9" width="6" height="6" rx="1.5"/></svg>
+      </button>
+    </div>
+
+    <div id="zoomCtl" class="chrome pill">
+      <button class="icon-btn" id="zoomOut" title="Zoom out (−)" aria-label="Zoom out">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14"/></svg>
+      </button>
+      <button id="zoomPct" title="Reset to 100%">100%</button>
+      <button class="icon-btn" id="zoomIn" title="Zoom in (+)" aria-label="Zoom in">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+      </button>
+      <button class="icon-btn" id="zoomFit" title="Zoom to fit (F)" aria-label="Zoom to fit">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9V5a1 1 0 0 1 1-1h4M15 4h4a1 1 0 0 1 1 1v4M20 15v4a1 1 0 0 1-1 1h-4M9 20H5a1 1 0 0 1-1-1v-4"/></svg>
+      </button>
+    </div>
+
+    <div id="layersCtl" class="chrome pill">
+      <label class="lyr on"><input type="checkbox" data-layer="app" checked>App Code</label>
+      <label class="lyr on"><input type="checkbox" data-layer="cicd" checked>CI / CD</label>
+      <label class="lyr on"><input type="checkbox" data-layer="infra" checked>Infra</label>
+    </div>
+
+    <div id="minimap" class="chrome" title="Minimap — click to jump">
+      <svg id="mmSvg" preserveAspectRatio="xMidYMid meet"><g id="mmFrames"></g><g id="mmNodes"></g><rect id="mmView" x="0" y="0" width="0" height="0" rx="2"/></svg>
+    </div>
+
+    <div id="hint" class="chrome">Drag to pan · Scroll or pinch to zoom · Click a card for details</div>
+  </div>
+
+  <div id="panel">
+    <div id="panelInner">
+      <div id="panelHead">
+        <div id="panelTitle">—</div>
+        <button id="panelClose" class="icon-btn" title="Close" aria-label="Close details">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </div>
+      <div id="panelBody"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+'use strict';
+/* =====================================================================
+   zui-visualize-fable — Miro-style repo architecture board (renderer)
+
+   GRAPH CONTRACT — a repo parser emits this JSON and the renderer below
+   draws it. This demo ships with sample data for "checkout-service".
+
+   node:    { id, label, sub?, layer: "app"|"cicd"|"infra",
+              shape: "rect"|"hex"|"pipe", cluster?: clusterId,
+              loc?: number, details?: [[k,v],...] }
+   edge:    { from, to, kind: "import"|"pipe"|"cross"|"infra", rel? }
+   cluster: { id, label, color: cssVarName, layer, slot:{x,y},
+              dag?: true  (lay members out left-to-right by edge order) }
+   ===================================================================== */
+
+const GRAPH  = /*__GRAPH__*/ null;
+const LABELS = /*__LABELS__*/ {};
+const META   = /*__META__*/ {};
+
+/* ===================== helpers ===================== */
+const $ = id => document.getElementById(id);
+const SVGNS = 'http://www.w3.org/2000/svg';
+const el = (tag, attrs, parent) => {
+  const e = document.createElementNS(SVGNS, tag);
+  if (attrs) for (const k in attrs) e.setAttribute(k, attrs[k]);
+  if (parent) parent.appendChild(e);
+  return e;
+};
+const cssVar = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+
+/* seeded rng — deterministic board layout on every load */
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
+const rand = mulberry32(42);
+
+/* ===================== model prep ===================== */
+const nodes = GRAPH.nodes.map(n => ({...n, x:0, y:0, w:130, h:46, fixed:false, hidden:false}));
+const nodeById = new Map(nodes.map(n => [n.id, n]));
+const edges = GRAPH.edges.map(e => ({...e}));
+const clusters = GRAPH.clusters.map(c => ({...c, members:[], box:null, hidden:false}));
+const clusterById = new Map(clusters.map(c => [c.id, c]));
+nodes.forEach(n => { if (n.cluster && clusterById.has(n.cluster)) clusterById.get(n.cluster).members.push(n); });
+
+/* fan-in / fan-out */
+nodes.forEach(n => { n.fanOut = 0; n.fanIn = 0; });
+edges.forEach(e => {
+  const a = nodeById.get(e.from), b = nodeById.get(e.to);
+  if (a) a.fanOut++; if (b) b.fanIn++;
+});
+const maxLoc = Math.max(...nodes.map(n => n.loc || 0), 1);
+
+const layerOn = {app:true, cicd:true, infra:true};
+function nodeColor(n){
+  if (n.cluster) return cssVar(clusterById.get(n.cluster).color);
+  return '#C9CDD6'; /* frameless nodes get a neutral stripe */
+}
+
+/* ===================== view state ===================== */
+const wrap = $('canvasWrap'), board = $('board'), viewport = $('viewport');
+let view = {tx:0, ty:0, s:1};
+function applyView(){
+  viewport.setAttribute('transform', `translate(${view.tx},${view.ty}) scale(${view.s})`);
+  const g = 24 * view.s;
+  wrap.style.backgroundSize = `${g}px ${g}px`;
+  wrap.style.backgroundPosition = `${view.tx}px ${view.ty}px`;
+  wrap.classList.toggle('grid-faded', view.s < 0.32);
+  $('zoomPct').textContent = Math.round(view.s * 100) + '%';
+  updateMinimapView();
+}
+function screenToWorld(px, py){ return {x:(px - view.tx)/view.s, y:(py - view.ty)/view.s}; }
+function zoomAt(px, py, factor){
+  const ns = clamp(view.s * factor, 0.15, 3);
+  const k = ns / view.s;
+  view.tx = px - (px - view.tx) * k;
+  view.ty = py - (py - view.ty) * k;
+  view.s = ns;
+  applyView();
+}
+
+/* ===================== node DOM ===================== */
+const nodesG = $('nodesG'), edgesG = $('edgesG'), framesG = $('framesG'), guidesG = $('guidesG');
+
+function hexPath(w, h){
+  const i = Math.min(18, w * 0.18);
+  return `M${i},0 L${w-i},0 L${w},${h/2} L${w-i},${h} L${i},${h} L0,${h/2} Z`;
+}
+function buildNode(n){
+  const g = el('g', {class:'node', 'data-node':n.id}, nodesG);
+  const cg = el('g', {class:'card-g'}, g);
+  n._g = g; n._cg = cg;
+  const color = nodeColor(n);
+
+  if (n.shape === 'hex'){
+    n._card = el('path', {class:'card'}, cg);
+    n._stripe = el('path', {class:'stripe', fill:color}, cg);
+  } else {
+    n._card = el('rect', {class:'card', rx:10, ry:10}, cg);
+    n._stripe = el('rect', {class:'stripe', fill:color, rx:2, ry:2}, cg);
+  }
+  n._lbl = el('text', {class:'lbl'}, cg); n._lbl.textContent = n.label;
+  if (n.sub){ n._sub = el('text', {class:'sub'}, cg); n._sub.textContent = n.sub; }
+  if (n.shape === 'pipe'){ n._chev = el('path', {class:'chev'}, cg); }
+
+  n._selOutline = el(n.shape === 'hex' ? 'path' : 'rect', {class:'sel-outline', rx:12, ry:12}, g);
+  n._handles = [0,1,2,3].map(() => el('rect', {class:'handle', width:6, height:6}, g));
+}
+nodes.forEach(buildNode);
+
+/* measure labels, then size cards */
+function sizeNodes(){
+  nodes.forEach(n => {
+    const tw = Math.max(n._lbl.getBBox().width, n._sub ? n._sub.getBBox().width : 0);
+    const ms = 0.9 + 0.35 * clamp((n.loc || 60) / maxLoc, 0, 1);   /* gentle LOC scaling */
+    const pad = n.shape === 'hex' ? 46 : 30;
+    n.w = clamp((tw + pad) * ms, 116, 236);
+    n.h = (n.sub ? 48 : 38) * clamp(ms, 0.95, 1.12);
+    layoutNodeInternals(n);
+  });
+}
+function layoutNodeInternals(n){
+  const {w, h} = n;
+  if (n.shape === 'hex'){
+    n._card.setAttribute('d', hexPath(w, h));
+    const i = Math.min(18, w * 0.18);
+    n._stripe.setAttribute('d', `M${i+1},1.4 L${w-i-1},1.4 L${w-i-4},4.4 L${i+4},4.4 Z`);
+    n._selOutline.setAttribute('d', hexPath(w + 6, h + 6));
+    n._selOutline.setAttribute('transform', 'translate(-3,-3)');
+  } else {
+    n._card.setAttribute('width', w); n._card.setAttribute('height', h);
+    n._stripe.setAttribute('x', 1.5); n._stripe.setAttribute('y', 5);
+    n._stripe.setAttribute('width', 4); n._stripe.setAttribute('height', h - 10);
+    n._selOutline.setAttribute('x', -3); n._selOutline.setAttribute('y', -3);
+    n._selOutline.setAttribute('width', w + 6); n._selOutline.setAttribute('height', h + 6);
+  }
+  const tx = n.shape === 'hex' ? Math.min(18, w*0.18) + 8 : 14;
+  n._lbl.setAttribute('x', tx); n._lbl.setAttribute('y', n.sub ? h/2 - 3 : h/2 + 4.5);
+  if (n._sub){ n._sub.setAttribute('x', tx); n._sub.setAttribute('y', h/2 + 12); }
+  if (n._chev){
+    const cx = w - 16, cy = h/2;
+    n._chev.setAttribute('d', `M${cx},${cy-5} L${cx+5},${cy} L${cx},${cy+5} M${cx-6},${cy-5} L${cx-1},${cy} L${cx-6},${cy+5}`);
+  }
+  const hs = [[-3,-3],[w-3,-3],[-3,h-3],[w-3,h-3]];
+  n._handles.forEach((hd, i) => { hd.setAttribute('x', hs[i][0]); hd.setAttribute('y', hs[i][1]); });
+}
+function placeNode(n){ n._g.setAttribute('transform', `translate(${n.x - n.w/2},${n.y - n.h/2})`); }
+
+/* ===================== layout ===================== */
+function layoutPipelineDAG(cluster){
+  /* rank by longest path over pipe edges within the cluster */
+  const ids = new Set(cluster.members.map(m => m.id));
+  const rank = {}; cluster.members.forEach(m => rank[m.id] = 0);
+  for (let pass = 0; pass < 6; pass++){
+    edges.forEach(e => {
+      if (e.kind === 'pipe' && ids.has(e.from) && ids.has(e.to))
+        rank[e.to] = Math.max(rank[e.to], rank[e.from] + 1);
+    });
+  }
+  const lanes = {};
+  cluster.members
+    .slice()
+    .sort((a,b) => rank[a.id] - rank[b.id] || a.label.localeCompare(b.label))
+    .forEach(m => {
+      const r = rank[m.id];
+      lanes[r] = (lanes[r] || 0);
+      m.x = cluster.slot.x + r * 230;
+      m.y = cluster.slot.y + lanes[r] * 96;
+      lanes[r]++;
+      m.fixed = true;
+    });
+  /* center lanes vertically per rank */
+  const byRank = {};
+  cluster.members.forEach(m => { (byRank[rank[m.id]] = byRank[rank[m.id]] || []).push(m); });
+  Object.values(byRank).forEach(arr => {
+    const off = (arr.length - 1) * 96 / 2;
+    arr.forEach(m => m.y -= off);
+  });
+}
+
+function forceLayout(){
+  clusters.forEach(c => { if (c.dag) layoutPipelineDAG(c); });
+  /* seed non-fixed nodes around their cluster slot (or a home point) */
+  nodes.forEach(n => {
+    if (n.fixed) return;
+    const home = n.cluster ? clusterById.get(n.cluster).slot : {x:1760, y:-140};
+    n.hx = home.x; n.hy = home.y;
+    n.x = home.x + (rand() - .5) * 240;
+    n.y = home.y + (rand() - .5) * 240;
+  });
+  nodes.forEach(n => { if (n.fixed){ n.hx = n.x; n.hy = n.y; } });
+
+  const N = nodes.length;
+  for (let it = 0; it < 320; it++){
+    const alpha = 0.9 * (1 - it / 320) + 0.06;
+    /* repulsion */
+    for (let i = 0; i < N; i++){
+      const a = nodes[i];
+      for (let j = i + 1; j < N; j++){
+        const b = nodes[j];
+        let dx = a.x - b.x, dy = a.y - b.y;
+        let d2 = dx*dx + dy*dy; if (d2 < 1) { dx = rand()-.5; dy = rand()-.5; d2 = 1; }
+        const d = Math.sqrt(d2);
+        const minD = (a.w + b.w)/2 + 46;
+        const f = Math.min(9000 / d2, 14) + (d < minD ? (minD - d) * 0.28 : 0);
+        const fx = dx/d * f * alpha, fy = dy/d * f * alpha;
+        if (!a.fixed){ a.x += fx; a.y += fy; }
+        if (!b.fixed){ b.x -= fx; b.y -= fy; }
+      }
+    }
+    /* springs */
+    edges.forEach(e => {
+      const a = nodeById.get(e.from), b = nodeById.get(e.to);
+      if (!a || !b) return;
+      const dx = b.x - a.x, dy = b.y - a.y;
+      const d = Math.sqrt(dx*dx + dy*dy) || 1;
+      const rest = a.cluster === b.cluster ? 170 : 320;
+      const f = (d - rest) * 0.012 * alpha;
+      const fx = dx/d * f, fy = dy/d * f;
+      if (!a.fixed){ a.x += fx; a.y += fy; }
+      if (!b.fixed){ b.x -= fx; b.y -= fy; }
+    });
+    /* gravity home */
+    nodes.forEach(n => {
+      if (n.fixed) return;
+      n.x += (n.hx - n.x) * 0.02 * alpha;
+      n.y += (n.hy - n.y) * 0.02 * alpha;
+    });
+  }
+  computeFrames();
+  deOverlapClusters();
+}
+
+function computeFrames(){
+  clusters.forEach(c => {
+    if (!c.members.length){ c.box = null; return; }
+    let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+    c.members.forEach(m => {
+      x0 = Math.min(x0, m.x - m.w/2); y0 = Math.min(y0, m.y - m.h/2);
+      x1 = Math.max(x1, m.x + m.w/2); y1 = Math.max(y1, m.y + m.h/2);
+    });
+    const pad = 30;
+    c.box = {x:x0 - pad, y:y0 - pad, w:(x1 - x0) + pad*2, h:(y1 - y0) + pad*2};
+  });
+}
+function deOverlapClusters(){
+  for (let it = 0; it < 60; it++){
+    let moved = false;
+    for (let i = 0; i < clusters.length; i++){
+      for (let j = i + 1; j < clusters.length; j++){
+        const A = clusters[i].box, B = clusters[j].box;
+        if (!A || !B) continue;
+        const m = 34;
+        const ox = Math.min(A.x + A.w + m, B.x + B.w + m) - Math.max(A.x - m, B.x - m);
+        const oy = Math.min(A.y + A.h + m, B.y + B.h + m) - Math.max(A.y - m, B.y - m);
+        if (ox > 0 && oy > 0){
+          moved = true;
+          const push = Math.min(ox, oy) / 2 + 2;
+          let dx = 0, dy = 0;
+          if (ox < oy) dx = (A.x + A.w/2 < B.x + B.w/2) ? -push : push;
+          else dy = (A.y + A.h/2 < B.y + B.h/2) ? -push : push;
+          translateCluster(clusters[i], dx, dy);
+          translateCluster(clusters[j], -dx, -dy);
+        }
+      }
+    }
+    if (!moved) break;
+  }
+}
+function translateCluster(c, dx, dy){
+  c.members.forEach(m => { m.x += dx; m.y += dy; });
+  if (c.box){ c.box.x += dx; c.box.y += dy; }
+}
+
+/* ===================== frames DOM ===================== */
+function buildFrames(){
+  framesG.innerHTML = '';
+  clusters.forEach(c => {
+    if (!c.box) return;
+    const color = cssVar(c.color);
+    const g = el('g', {class:'frame', 'data-frame':c.id}, framesG);
+    c._g = g;
+    c._rect = el('rect', {
+      class:'frame-rect', rx:16, ry:16,
+      fill:color, 'fill-opacity':0.08, stroke:color
+    }, g);
+    const pill = el('g', {class:'frame-pill', 'data-frame':c.id}, g);
+    c._pill = pill;
+    c._pillRect = el('rect', {rx:11, ry:11, height:22, fill:color}, pill);
+    c._pillText = el('text', {y:15}, pill);
+    c._pillText.textContent = c.label;
+    updateFrame(c);
+    const tw = c._pillText.getBBox().width;
+    c._pillRect.setAttribute('width', tw + 22);
+    c._pillText.setAttribute('x', 11);
+    updateFrame(c);
+  });
+}
+function updateFrame(c){
+  if (!c.box || !c._rect) return;
+  c._rect.setAttribute('x', c.box.x); c._rect.setAttribute('y', c.box.y);
+  c._rect.setAttribute('width', c.box.w); c._rect.setAttribute('height', c.box.h);
+  const pw = c._pillRect ? +c._pillRect.getAttribute('width') || 60 : 60;
+  c._pill.setAttribute('transform', `translate(${c.box.x + 14},${c.box.y - 11})`);
+  void pw;
+}
+function refreshFrameOf(node){
+  if (!node.cluster) return;
+  const c = clusterById.get(node.cluster);
+  const keep = c.box;
+  computeFrameSingle(c);
+  if (keep) updateFrame(c);
+}
+function computeFrameSingle(c){
+  if (!c.members.length) return;
+  let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+  c.members.forEach(m => {
+    x0 = Math.min(x0, m.x - m.w/2); y0 = Math.min(y0, m.y - m.h/2);
+    x1 = Math.max(x1, m.x + m.w/2); y1 = Math.max(y1, m.y + m.h/2);
+  });
+  const pad = 30;
+  c.box = {x:x0 - pad, y:y0 - pad, w:(x1 - x0) + pad*2, h:(y1 - y0) + pad*2};
+}
+
+/* ===================== edges DOM ===================== */
+function buildEdges(){
+  edgesG.innerHTML = '';
+  edges.forEach(e => {
+    e._p = el('path', {class:'edge e-' + e.kind, 'marker-end':'url(#arrowGray)'}, edgesG);
+    if (e.kind === 'pipe') e._p.setAttribute('marker-end', 'url(#arrowAccent)');
+  });
+  updateEdges();
+}
+function anchor(n, tx, ty){
+  const dx = tx - n.x, dy = ty - n.y;
+  const rx = n.w/2 + 7, ry = n.h/2 + 7;
+  const t = 1 / Math.max(Math.abs(dx)/rx, Math.abs(dy)/ry, 1e-6);
+  return {x:n.x + dx * Math.min(t, 1), y:n.y + dy * Math.min(t, 1)};
+}
+function updateEdges(){
+  edges.forEach(e => {
+    const a = nodeById.get(e.from), b = nodeById.get(e.to);
+    if (!a || !b || !e._p) return;
+    if (a.hidden || b.hidden){ e._p.style.display = 'none'; return; }
+    e._p.style.display = '';
+    const p1 = anchor(a, b.x, b.y), p2 = anchor(b, a.x, a.y);
+    let d;
+    if (e.kind === 'pipe'){
+      const k = Math.max(44, Math.abs(p2.x - p1.x) * 0.45);
+      d = `M${p1.x},${p1.y} C${p1.x + k},${p1.y} ${p2.x - k},${p2.y} ${p2.x},${p2.y}`;
+    } else {
+      const dx = p2.x - p1.x, dy = p2.y - p1.y;
+      const dist = Math.sqrt(dx*dx + dy*dy) || 1;
+      const off = clamp(dist * 0.16, 10, 56);
+      const nx = -dy / dist * off, ny = dx / dist * off;
+      const c1 = {x:p1.x + dx/3 + nx, y:p1.y + dy/3 + ny};
+      const c2 = {x:p1.x + dx*2/3 + nx, y:p1.y + dy*2/3 + ny};
+      d = `M${p1.x},${p1.y} C${c1.x},${c1.y} ${c2.x},${c2.y} ${p2.x},${p2.y}`;
+    }
+    e._p.setAttribute('d', d);
+  });
+}
+
+/* ===================== visibility (layers) ===================== */
+function applyLayers(){
+  nodes.forEach(n => {
+    n.hidden = !layerOn[n.layer];
+    n._g.style.display = n.hidden ? 'none' : '';
+  });
+  clusters.forEach(c => {
+    const vis = c.members.some(m => !m.hidden);
+    if (c._g) c._g.style.display = vis ? '' : 'none';
+  });
+  updateEdges();
+  if (selected && selected.hidden) clearSelection();
+  applySearch();
+  updateMinimap();
+}
+
+/* ===================== selection & side panel ===================== */
+let selected = null;
+const panel = $('panel');
+function neighborsOf(id){
+  const set = new Set();
+  edges.forEach(e => {
+    if (e.from === id) set.add(e.to);
+    if (e.to === id) set.add(e.from);
+  });
+  return set;
+}
+function selectNode(n, pan){
+  clearSelection(true);
+  selected = n;
+  n._g.classList.add('selected');
+  board.classList.add('focus');
+  const nb = neighborsOf(n.id);
+  nodes.forEach(m => m._g.classList.toggle('rel', nb.has(m.id)));
+  edges.forEach(e => {
+    const hl = e.from === n.id || e.to === n.id;
+    e._p.classList.toggle('hl', hl);
+    e._p.setAttribute('marker-end', hl ? 'url(#arrowAccent)' : (e.kind === 'pipe' ? 'url(#arrowAccent)' : 'url(#arrowGray)'));
+    if (hl) edgesG.appendChild(e._p);
+  });
+  renderPanel(n);
+  panel.classList.add('open');
+  if (pan) panTo(n);
+}
+function clearSelection(keepPanel){
+  if (selected){ selected._g.classList.remove('selected'); selected = null; }
+  board.classList.remove('focus');
+  nodes.forEach(m => m._g.classList.remove('rel'));
+  edges.forEach(e => {
+    if (!e._p) return;
+    e._p.classList.remove('hl');
+    e._p.setAttribute('marker-end', e.kind === 'pipe' ? 'url(#arrowAccent)' : 'url(#arrowGray)');
+  });
+  if (!keepPanel) panel.classList.remove('open');
+}
+function panTo(n){
+  const r = wrap.getBoundingClientRect();
+  const target = {tx: r.width/2 - n.x * view.s, ty: r.height/2 - n.y * view.s};
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (reduce){ view.tx = target.tx; view.ty = target.ty; applyView(); return; }
+  const from = {tx:view.tx, ty:view.ty}, t0 = performance.now();
+  (function step(t){
+    const k = clamp((t - t0)/240, 0, 1), e = 1 - Math.pow(1 - k, 3);
+    view.tx = from.tx + (target.tx - from.tx) * e;
+    view.ty = from.ty + (target.ty - from.ty) * e;
+    applyView();
+    if (k < 1) requestAnimationFrame(step);
+  })(t0);
+}
+const LAYER_META = {
+  app:  {label:'App Code', color:'--note-blue'},
+  cicd: {label:'CI / CD',  color:'--note-orange'},
+  infra:{label:'Infra',    color:'--note-purple'}
+};
+function renderPanel(n){
+  $('panelTitle').textContent = n.label;
+  const body = $('panelBody');
+  body.innerHTML = '';
+  const lm = LAYER_META[n.layer];
+  const badge = document.createElement('span');
+  badge.className = 'badge';
+  badge.style.background = cssVar(lm.color);
+  badge.textContent = lm.label + (n.shape === 'hex' ? ' · resource' : n.shape === 'pipe' ? ' · job' : ' · file');
+  body.appendChild(badge);
+
+  if (n.sub || n.cluster){
+    const p = document.createElement('div'); p.className = 'pathline';
+    const cl = n.cluster ? clusterById.get(n.cluster).label : 'repo root';
+    p.textContent = (n.sub && n.sub !== cl ? n.sub + ' · ' : '') + cl;
+    body.appendChild(p);
+  }
+
+  const mx = document.createElement('div'); mx.className = 'metrics';
+  const mk = (v, k) => { const d = document.createElement('div'); d.className = 'metric';
+    d.innerHTML = `<div class="v">${v}</div><div class="k">${k}</div>`; mx.appendChild(d); };
+  if (n.loc != null) mk(n.loc, 'LOC');
+  mk(n.fanOut, 'fan-out'); mk(n.fanIn, 'fan-in');
+  body.appendChild(mx);
+
+  if (n.details && n.details.length){
+    const s = document.createElement('div'); s.className = 'sect'; s.textContent = 'Parsed fields';
+    body.appendChild(s);
+    n.details.forEach(([k, v]) => {
+      const r = document.createElement('div'); r.className = 'kv';
+      r.innerHTML = `<span class="k"></span><span class="v"></span>`;
+      r.querySelector('.k').textContent = k; r.querySelector('.v').textContent = v;
+      body.appendChild(r);
+    });
+  }
+
+  const outs = edges.filter(e => e.from === n.id);
+  const ins  = edges.filter(e => e.to === n.id);
+  const list = (title, arr, dir) => {
+    const s = document.createElement('div'); s.className = 'sect'; s.textContent = title;
+    body.appendChild(s);
+    if (!arr.length){ const e = document.createElement('div'); e.className = 'empty'; e.textContent = 'none'; body.appendChild(e); return; }
+    arr.forEach(ed => {
+      const other = nodeById.get(dir === 'out' ? ed.to : ed.from);
+      if (!other) return;
+      const r = document.createElement('div'); r.className = 'linkrow';
+      r.innerHTML = `<span class="sw"></span><span class="nm"></span><span class="rel"></span>`;
+      r.querySelector('.sw').style.background = nodeColor(other);
+      r.querySelector('.nm').textContent = other.label;
+      r.querySelector('.rel').textContent = ed.rel || ed.kind;
+      r.addEventListener('click', () => selectNode(other, true));
+      body.appendChild(r);
+    });
+  };
+  list('Dependencies · outgoing', outs, 'out');
+  list('Dependents · incoming', ins, 'in');
+}
+$('panelClose').addEventListener('click', () => clearSelection());
+
+/* ===================== search ===================== */
+const searchInput = $('search');
+function applySearch(){
+  const q = searchInput.value.trim().toLowerCase();
+  $('searchWrap').classList.toggle('has-q', !!q);
+  if (!q){ board.classList.remove('searching'); nodes.forEach(n => n._g.classList.remove('match')); return; }
+  board.classList.add('searching');
+  nodes.forEach(n => {
+    const hay = (n.label + ' ' + (n.sub || '') + ' ' + (n.cluster ? clusterById.get(n.cluster).label : '')).toLowerCase();
+    n._g.classList.toggle('match', !n.hidden && hay.includes(q));
+  });
+}
+searchInput.addEventListener('input', applySearch);
+$('searchClear').addEventListener('click', () => { searchInput.value = ''; applySearch(); searchInput.focus(); });
+
+/* ===================== layer toggles ===================== */
+document.querySelectorAll('#layersCtl input').forEach(cb => {
+  cb.addEventListener('change', () => {
+    layerOn[cb.dataset.layer] = cb.checked;
+    cb.closest('.lyr').classList.toggle('on', cb.checked);
+    applyLayers();
+  });
+});
+
+/* ===================== snap guides ===================== */
+let guideV = null, guideH = null;
+function clearGuides(){ guidesG.innerHTML = ''; guideV = guideH = null; }
+function showGuides(drag){
+  clearGuides();
+  const th = 6 / view.s;
+  let bestX = null, bestY = null;
+  nodes.forEach(o => {
+    if (o === drag || o.hidden) return;
+    const oxs = [o.x, o.x - o.w/2, o.x + o.w/2];
+    const dxs = [drag.x, drag.x - drag.w/2, drag.x + drag.w/2];
+    oxs.forEach(ox => dxs.forEach((dx, di) => {
+      const d = Math.abs(dx - ox);
+      if (d < th && (!bestX || d < bestX.d)) bestX = {d, ox, di, o};
+    }));
+    const oys = [o.y, o.y - o.h/2, o.y + o.h/2];
+    const dys = [drag.y, drag.y - drag.h/2, drag.y + drag.h/2];
+    oys.forEach(oy => dys.forEach((dy, di) => {
+      const d = Math.abs(dy - oy);
+      if (d < th && (!bestY || d < bestY.d)) bestY = {d, oy, di, o};
+    }));
+  });
+  if (bestX){
+    const off = bestX.di === 1 ? drag.w/2 : bestX.di === 2 ? -drag.w/2 : 0;
+    drag.x = bestX.ox + off;
+    const y0 = Math.min(drag.y, bestX.o.y) - 60, y1 = Math.max(drag.y, bestX.o.y) + 60;
+    guideV = el('line', {class:'guide', x1:bestX.ox, x2:bestX.ox, y1:y0, y2:y1}, guidesG);
+  }
+  if (bestY){
+    const off = bestY.di === 1 ? drag.h/2 : bestY.di === 2 ? -drag.h/2 : 0;
+    drag.y = bestY.oy + off;
+    const x0 = Math.min(drag.x, bestY.o.x) - 60, x1 = Math.max(drag.x, bestY.o.x) + 60;
+    guideH = el('line', {class:'guide', y1:bestY.oy, y2:bestY.oy, x1:x0, x2:x1}, guidesG);
+  }
+}
+
+/* ===================== pointer interaction ===================== */
+let tool = 'select';
+function setTool(t){
+  tool = t;
+  $('toolSelect').classList.toggle('active', t === 'select');
+  $('toolHand').classList.toggle('active', t === 'hand');
+  board.classList.toggle('hand', t === 'hand');
+}
+$('toolSelect').addEventListener('click', () => setTool('select'));
+$('toolHand').addEventListener('click', () => setTool('hand'));
+$('toolFit').addEventListener('click', () => fitView());
+
+const pointers = new Map();
+let gesture = null; /* {type:'pan'|'node'|'frame'|'pinch', ...} */
+let pinchStart = null;
+
+board.addEventListener('pointerdown', ev => {
+  board.setPointerCapture(ev.pointerId);
+  pointers.set(ev.pointerId, {x:ev.clientX, y:ev.clientY});
+  dismissHint();
+
+  if (pointers.size === 2){
+    const [a, b] = [...pointers.values()];
+    pinchStart = {
+      d: Math.hypot(a.x - b.x, a.y - b.y),
+      cx: (a.x + b.x)/2, cy: (a.y + b.y)/2,
+      view: {...view}
+    };
+    gesture = {type:'pinch'};
+    return;
+  }
+
+  const nEl = ev.target.closest('[data-node]');
+  const fEl = ev.target.closest('[data-frame]');
+  const start = {x:ev.clientX, y:ev.clientY};
+
+  if (tool !== 'hand' && nEl){
+    const n = nodeById.get(nEl.getAttribute('data-node'));
+    gesture = {type:'node', n, start, sx:n.x, sy:n.y, moved:false};
+  } else if (tool !== 'hand' && fEl){
+    const c = clusterById.get(fEl.getAttribute('data-frame'));
+    gesture = {type:'frame', c, start, moved:false,
+      startPos: c.members.map(m => ({m, x:m.x, y:m.y})), box0:{...c.box}};
+  } else {
+    gesture = {type:'pan', start, tx:view.tx, ty:view.ty};
+    board.classList.add('panning');
+  }
+});
+
+board.addEventListener('pointermove', ev => {
+  if (!pointers.has(ev.pointerId)) return;
+  pointers.set(ev.pointerId, {x:ev.clientX, y:ev.clientY});
+
+  if (gesture && gesture.type === 'pinch' && pointers.size === 2 && pinchStart){
+    const [a, b] = [...pointers.values()];
+    const d = Math.hypot(a.x - b.x, a.y - b.y);
+    const cx = (a.x + b.x)/2, cy = (a.y + b.y)/2;
+    const k = clamp(pinchStart.view.s * (d / pinchStart.d), 0.15, 3) / pinchStart.view.s;
+    view.s = pinchStart.view.s * k;
+    view.tx = cx - (pinchStart.cx - pinchStart.view.tx) * k;
+    view.ty = cy - (pinchStart.cy - pinchStart.view.ty) * k;
+    applyView();
+    return;
+  }
+  if (!gesture) return;
+
+  const dx = ev.clientX - gesture.start.x, dy = ev.clientY - gesture.start.y;
+
+  if (gesture.type === 'pan'){
+    view.tx = gesture.tx + dx; view.ty = gesture.ty + dy;
+    applyView();
+  } else if (gesture.type === 'node'){
+    if (!gesture.moved && Math.hypot(dx, dy) < 4) return;
+    if (!gesture.moved){ gesture.moved = true; gesture.n._g.classList.add('lift'); board.classList.add('dragging-node'); nodesG.appendChild(gesture.n._g); }
+    gesture.n.x = gesture.sx + dx / view.s;
+    gesture.n.y = gesture.sy + dy / view.s;
+    showGuides(gesture.n);
+    placeNode(gesture.n);
+    refreshFrameOf(gesture.n);
+    updateEdges();
+    updateMinimap();
+  } else if (gesture.type === 'frame'){
+    if (!gesture.moved && Math.hypot(dx, dy) < 4) return;
+    if (!gesture.moved){ gesture.moved = true; gesture.c._g.classList.add('lift'); }
+    const wdx = dx / view.s, wdy = dy / view.s;
+    gesture.startPos.forEach(p => { p.m.x = p.x + wdx; p.m.y = p.y + wdy; placeNode(p.m); });
+    gesture.c.box = {x:gesture.box0.x + wdx, y:gesture.box0.y + wdy, w:gesture.box0.w, h:gesture.box0.h};
+    updateFrame(gesture.c);
+    updateEdges();
+    updateMinimap();
+  }
+});
+
+function endPointer(ev){
+  pointers.delete(ev.pointerId);
+  if (gesture && gesture.type === 'pinch'){ if (pointers.size < 2){ gesture = null; pinchStart = null; } return; }
+  if (!gesture) return;
+  if (gesture.type === 'pan'){
+    board.classList.remove('panning');
+    const moved = Math.hypot(ev.clientX - gesture.start.x, ev.clientY - gesture.start.y) > 4;
+    if (!moved){ clearSelection(); if (searchInput === document.activeElement) searchInput.blur(); }
+  } else if (gesture.type === 'node'){
+    gesture.n._g.classList.remove('lift');
+    board.classList.remove('dragging-node');
+    clearGuides();
+    if (!gesture.moved) selectNode(gesture.n, false);
+    else refreshFrameOf(gesture.n);
+  } else if (gesture.type === 'frame'){
+    gesture.c._g.classList.remove('lift');
+  }
+  gesture = null;
+}
+board.addEventListener('pointerup', endPointer);
+board.addEventListener('pointercancel', endPointer);
+
+/* wheel zoom (and trackpad pinch via ctrlKey) */
+wrap.addEventListener('wheel', ev => {
+  ev.preventDefault();
+  dismissHint();
+  const r = wrap.getBoundingClientRect();
+  const f = Math.exp(-ev.deltaY * (ev.ctrlKey ? 0.008 : 0.0016));
+  zoomAt(ev.clientX - r.left, ev.clientY - r.top, f);
+}, {passive:false});
+
+/* ===================== zoom controls / fit ===================== */
+function centerZoom(f){
+  const r = wrap.getBoundingClientRect();
+  zoomAt(r.width/2, r.height/2, f);
+}
+$('zoomIn').addEventListener('click', () => centerZoom(1.2));
+$('zoomOut').addEventListener('click', () => centerZoom(1/1.2));
+$('zoomPct').addEventListener('click', () => {
+  const r = wrap.getBoundingClientRect();
+  const c = screenToWorld(r.width/2, r.height/2);
+  view.s = 1;
+  view.tx = r.width/2 - c.x; view.ty = r.height/2 - c.y;
+  applyView();
+});
+$('zoomFit').addEventListener('click', () => fitView());
+
+function contentBBox(){
+  let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9, any = false;
+  nodes.forEach(n => {
+    if (n.hidden) return; any = true;
+    x0 = Math.min(x0, n.x - n.w/2); y0 = Math.min(y0, n.y - n.h/2);
+    x1 = Math.max(x1, n.x + n.w/2); y1 = Math.max(y1, n.y + n.h/2);
+  });
+  return any ? {x:x0, y:y0, w:x1 - x0, h:y1 - y0} : null;
+}
+function fitView(){
+  const bb = contentBBox(); if (!bb) return;
+  const r = wrap.getBoundingClientRect();
+  const pad = 90;
+  const s = clamp(Math.min((r.width - pad)/bb.w, (r.height - pad)/bb.h), 0.15, 1.4);
+  view.s = s;
+  view.tx = (r.width - bb.w * s)/2 - bb.x * s;
+  view.ty = (r.height - bb.h * s)/2 - bb.y * s;
+  applyView();
+}
+
+/* ===================== minimap ===================== */
+const mmSvg = $('mmSvg'), mmNodes = $('mmNodes'), mmFrames = $('mmFrames'), mmView = $('mmView');
+let mmScale = 1, mmOff = {x:0, y:0}, mmBB = null;
+function updateMinimap(){
+  const bb = contentBBox(); if (!bb) return;
+  mmBB = {x:bb.x - 80, y:bb.y - 80, w:bb.w + 160, h:bb.h + 160};
+  mmSvg.setAttribute('viewBox', `0 0 180 120`);
+  mmScale = Math.min(170/mmBB.w, 110/mmBB.h);
+  mmOff = {x:(180 - mmBB.w * mmScale)/2, y:(120 - mmBB.h * mmScale)/2};
+  mmFrames.innerHTML = ''; mmNodes.innerHTML = '';
+  clusters.forEach(c => {
+    if (!c.box || c.members.every(m => m.hidden)) return;
+    el('rect', {
+      x:mmOff.x + (c.box.x - mmBB.x)*mmScale, y:mmOff.y + (c.box.y - mmBB.y)*mmScale,
+      width:c.box.w * mmScale, height:c.box.h * mmScale, rx:2,
+      fill:cssVar(c.color), 'fill-opacity':0.35
+    }, mmFrames);
+  });
+  nodes.forEach(n => {
+    if (n.hidden) return;
+    el('rect', {
+      x:mmOff.x + (n.x - n.w/2 - mmBB.x)*mmScale, y:mmOff.y + (n.y - n.h/2 - mmBB.y)*mmScale,
+      width:Math.max(2, n.w * mmScale), height:Math.max(1.6, n.h * mmScale), rx:1,
+      fill:'#9AA0AE'
+    }, mmNodes);
+  });
+  updateMinimapView();
+}
+function updateMinimapView(){
+  if (!mmBB) return;
+  const r = wrap.getBoundingClientRect();
+  const w0 = screenToWorld(0, 0), w1 = screenToWorld(r.width, r.height);
+  mmView.setAttribute('x', mmOff.x + (w0.x - mmBB.x)*mmScale);
+  mmView.setAttribute('y', mmOff.y + (w0.y - mmBB.y)*mmScale);
+  mmView.setAttribute('width', Math.max(4, (w1.x - w0.x)*mmScale));
+  mmView.setAttribute('height', Math.max(4, (w1.y - w0.y)*mmScale));
+}
+function mmJump(ev){
+  if (!mmBB) return;
+  const r = $('minimap').getBoundingClientRect();
+  const px = (ev.clientX - r.left) / r.width * 180;
+  const py = (ev.clientY - r.top) / r.height * 120;
+  const wx = (px - mmOff.x)/mmScale + mmBB.x;
+  const wy = (py - mmOff.y)/mmScale + mmBB.y;
+  const wr = wrap.getBoundingClientRect();
+  view.tx = wr.width/2 - wx * view.s;
+  view.ty = wr.height/2 - wy * view.s;
+  applyView();
+}
+$('minimap').addEventListener('pointerdown', ev => {
+  ev.stopPropagation();
+  $('minimap').setPointerCapture(ev.pointerId);
+  mmJump(ev);
+  const mv = e => mmJump(e);
+  const up = () => { $('minimap').removeEventListener('pointermove', mv); $('minimap').removeEventListener('pointerup', up); };
+  $('minimap').addEventListener('pointermove', mv);
+  $('minimap').addEventListener('pointerup', up);
+});
+
+/* ===================== keyboard ===================== */
+document.addEventListener('keydown', ev => {
+  if (ev.target === searchInput){ if (ev.key === 'Escape'){ searchInput.value = ''; applySearch(); searchInput.blur(); } return; }
+  if (ev.key === 'Escape') clearSelection();
+  else if (ev.key === '+' || ev.key === '=') centerZoom(1.2);
+  else if (ev.key === '-') centerZoom(1/1.2);
+  else if (ev.key === '0') $('zoomPct').click();
+  else if (ev.key === 'f' || ev.key === 'F') fitView();
+  else if (ev.key === 'v' || ev.key === 'V') setTool('select');
+  else if (ev.key === 'h' || ev.key === 'H') setTool('hand');
+});
+
+/* ===================== hint ===================== */
+let hintGone = false;
+function dismissHint(){ if (hintGone) return; hintGone = true; $('hint').classList.add('gone'); }
+setTimeout(dismissHint, 7000);
+
+/* ===================== init ===================== */
+sizeNodes();
+forceLayout();
+nodes.forEach(placeNode);
+buildFrames();
+buildEdges();
+applyLayers();
+fitView();
+updateMinimap();
+window.addEventListener('resize', () => { applyView(); });
+</script>
+</body>
+</html>
