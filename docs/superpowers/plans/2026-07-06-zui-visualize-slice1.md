@@ -245,7 +245,7 @@ class GraphBuilder {
 
   addEdge(from, to, kind, rel) {
     if (from === to) return;
-    const key = from + ' ' + to + ' ' + kind;
+    const key = from + ' ' + to + ' ' + kind;
     if (this._edgeKeys.has(key)) return;
     this._edgeKeys.add(key);
     this._edges.push({ from, to, kind, ...(rel != null ? { rel } : {}) });
