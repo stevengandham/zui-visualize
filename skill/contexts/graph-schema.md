@@ -64,6 +64,8 @@ and `engineer.notes`.
 | function | `fn:<name>` | `fn:createOrder` |
 | cluster | `c_<dir-slug>` | `c_routes` |
 
+Note: the `route:`, `fn:`, and `svc:` id patterns are RESERVED for later slices — the Slice-1 extractor emits only file-module node ids and `c_*` cluster ids.
+
 IDs must be identical across `graph.json`, `labels.json`, and `meta.json`.
 
 ## Cluster color assignment

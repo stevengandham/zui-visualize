@@ -134,7 +134,10 @@ function / require extraction, service inference, degree-based node cap). Change
 - **Non-JS/TS:** existing grep fallback path emits app nodes best-effort (no `loc`,
   minimal `details`).
 - **CLI:** `node extract-app.js <root> --out-dir <dir>` writes `graph.json`,
-  `labels.json`, `meta.json`. Exit 1 on shallow graph (<4 nodes / <3 edges), 2 on usage.
+  `labels.json`, `meta.json`. On shallow graph (<4 nodes / <3 edges) the extractor
+  WARNS and continues (exit 0), still writing all files, rather than exiting 1
+  (amended 2026-07-06: warn-and-continue ships better UX — user still gets a partial
+  board). Exit 2 on usage.
 
 ### B. HTML template + injection
 
