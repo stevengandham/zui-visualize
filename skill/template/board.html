@@ -19,8 +19,34 @@
   --snap-guide:#FF3399;
   --note-yellow:#FFF2A8; --note-pink:#FFC9DD; --note-blue:#BFE0FF;
   --note-green:#C3F0CB; --note-orange:#FFD8A8; --note-purple:#E0D1FF;
+  --stripe-neutral:#C9CDD6;
+  --drop-soft:drop-shadow(0 2px 8px rgba(20,20,43,.08));
+  --drop-lifted:drop-shadow(0 8px 24px rgba(20,20,43,.16));
   --font:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  color-scheme:light;
 }
+:root[data-theme="dark"]{
+  --canvas-bg:#17181C;
+  --dot-grid:#26282E;
+  --accent:#7C93FF;
+  --accent-soft:#252B45;
+  --text-primary:#E8E9ED;
+  --text-secondary:#9BA0AC;
+  --card-bg:#1F2127;
+  --card-border:#33363E;
+  --shadow-soft:0 2px 8px rgba(0,0,0,.35);
+  --shadow-lifted:0 8px 24px rgba(0,0,0,.5);
+  --snap-guide:#FF66B3;
+  --note-yellow:#6B5E23; --note-pink:#6B3A50; --note-blue:#2B4A6B;
+  --note-green:#2E5738; --note-orange:#6B4A23; --note-purple:#4A3D6B;
+  --stripe-neutral:#4A4E5A;
+  --drop-soft:drop-shadow(0 2px 8px rgba(0,0,0,.45));
+  --drop-lifted:drop-shadow(0 8px 24px rgba(0,0,0,.6));
+  color-scheme:dark;
+}
+:root[data-theme="dark"] .frame-rect{fill-opacity:.14}
+:root[data-theme="dark"] #themeToggle .sun{display:none}
+:root:not([data-theme="dark"]) #themeToggle .moon{display:none}
 *{box-sizing:border-box;margin:0;padding:0}
 html,body{height:100%;overflow:hidden;font-family:var(--font);color:var(--text-primary)}
 #app{display:flex;height:100%;width:100%}
@@ -39,9 +65,9 @@ html,body{height:100%;overflow:hidden;font-family:var(--font);color:var(--text-p
 .node{cursor:pointer}
 .node .card-g{transform-box:fill-box;transform-origin:center;
   transition:transform .12s ease,filter .12s ease;
-  filter:drop-shadow(0 2px 8px rgba(20,20,43,.08))}
+  filter:var(--drop-soft)}
 .node:hover .card-g,.node.lift .card-g{transform:scale(1.02);
-  filter:drop-shadow(0 8px 24px rgba(20,20,43,.16))}
+  filter:var(--drop-lifted)}
 .node .card{fill:var(--card-bg);stroke:var(--card-border);stroke-width:1}
 .node .stripe{pointer-events:none}
 .node .lbl{font:500 13px var(--font);fill:var(--text-primary);pointer-events:none}
@@ -73,7 +99,7 @@ svg.focus .frame{opacity:.45}
 svg.searching .node:not(.match){opacity:.3}
 svg.searching .edge{opacity:.12}
 svg.searching .frame{opacity:.45}
-svg.searching .node.match .card-g{filter:drop-shadow(0 0 6px rgba(66,98,255,.85)) drop-shadow(0 2px 8px rgba(20,20,43,.08))}
+svg.searching .node.match .card-g{filter:drop-shadow(0 0 6px rgba(66,98,255,.85)) var(--drop-soft)}
 
 /* ---------- snap guides ---------- */
 .guide{stroke:var(--snap-guide);stroke-width:1;vector-effect:non-scaling-stroke;pointer-events:none}
@@ -174,6 +200,14 @@ button.icon-btn svg{width:18px;height:18px}
   *{transition:none!important}
 }
 </style>
+<script>
+(function(){
+  var stored = null;
+  try { stored = localStorage.getItem('zui-theme'); } catch(e){}
+  var dark = stored ? stored === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+  if (dark) document.documentElement.setAttribute('data-theme', 'dark');
+})();
+</script>
 </head>
 <body>
 <div id="app">
@@ -181,10 +215,10 @@ button.icon-btn svg{width:18px;height:18px}
     <svg id="board" xmlns="http://www.w3.org/2000/svg">
       <defs>
         <marker id="arrowGray" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
-          <path d="M0.5,0.8 L7,4 L0.5,7.2" fill="none" stroke="#6B6F7B" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M0.5,0.8 L7,4 L0.5,7.2" fill="none" style="stroke:var(--text-secondary)" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
         </marker>
         <marker id="arrowAccent" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
-          <path d="M0.5,0.8 L7,4 L0.5,7.2" fill="none" stroke="#4262FF" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M0.5,0.8 L7,4 L0.5,7.2" fill="none" style="stroke:var(--accent)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
         </marker>
       </defs>
       <g id="viewport">
@@ -223,6 +257,10 @@ button.icon-btn svg{width:18px;height:18px}
       </button>
       <button class="icon-btn" id="toolFit" title="Zoom to fit (F)" aria-label="Zoom to fit">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9V5a1 1 0 0 1 1-1h4M15 4h4a1 1 0 0 1 1 1v4M20 15v4a1 1 0 0 1-1 1h-4M9 20H5a1 1 0 0 1-1-1v-4"/><rect x="9" y="9" width="6" height="6" rx="1.5"/></svg>
+      </button>
+      <button class="icon-btn" id="themeToggle" title="Toggle dark mode" aria-label="Toggle dark mode">
+        <svg class="sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="4.5"/><path d="M12 2.5v2.5M12 19v2.5M2.5 12H5M19 12h2.5M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M19.1 4.9l-1.8 1.8M6.7 17.3l-1.8 1.8"/></svg>
+        <svg class="moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20.5 14.5A8.5 8.5 0 1 1 9.5 3.5a7 7 0 0 0 11 11z"/></svg>
       </button>
     </div>
 
@@ -336,8 +374,9 @@ const maxLoc = Math.max(...nodes.map(n => n.loc || 0), 1);
 
 const layerOn = {app:true, cicd:true, infra:true};
 function nodeColor(n){
-  if (n.cluster) return cssVar(clusterById.get(n.cluster).color);
-  return '#C9CDD6'; /* frameless nodes get a neutral stripe */
+  /* live var() references so colors follow theme switches without a re-render */
+  if (n.cluster) return `var(${clusterById.get(n.cluster).color})`;
+  return 'var(--stripe-neutral)'; /* frameless nodes get a neutral stripe */
 }
 
 /* ===================== view state ===================== */
@@ -377,10 +416,10 @@ function buildNode(n){
 
   if (n.shape === 'hex'){
     n._card = el('path', {class:'card'}, cg);
-    n._stripe = el('path', {class:'stripe', fill:color}, cg);
+    n._stripe = el('path', {class:'stripe', style:`fill:${color}`}, cg);
   } else {
     n._card = el('rect', {class:'card', rx:10, ry:10}, cg);
-    n._stripe = el('rect', {class:'stripe', fill:color, rx:2, ry:2}, cg);
+    n._stripe = el('rect', {class:'stripe', style:`fill:${color}`, rx:2, ry:2}, cg);
   }
   n._lbl = el('text', {class:'lbl'}, cg); n._lbl.textContent = labelFor(n);
   if (n.sub){ n._sub = el('text', {class:'sub'}, cg); n._sub.textContent = n.sub; }
@@ -560,16 +599,16 @@ function buildFrames(){
   framesG.innerHTML = '';
   clusters.forEach(c => {
     if (!c.box) return;
-    const color = cssVar(c.color);
+    const color = `var(${c.color})`;
     const g = el('g', {class:'frame', 'data-frame':c.id}, framesG);
     c._g = g;
     c._rect = el('rect', {
       class:'frame-rect', rx:16, ry:16,
-      fill:color, 'fill-opacity':0.08, stroke:color
+      style:`fill:${color};stroke:${color}`, 'fill-opacity':0.08
     }, g);
     const pill = el('g', {class:'frame-pill', 'data-frame':c.id}, g);
     c._pill = pill;
-    c._pillRect = el('rect', {rx:11, ry:11, height:22, fill:color}, pill);
+    c._pillRect = el('rect', {rx:11, ry:11, height:22, style:`fill:${color}`}, pill);
     c._pillText = el('text', {y:15}, pill);
     c._pillText.textContent = c.label;
     updateFrame(c);
@@ -725,7 +764,7 @@ function renderPanel(n){
   const lm = LAYER_META[n.layer];
   const badge = document.createElement('span');
   badge.className = 'badge';
-  badge.style.background = cssVar(lm.color);
+  badge.style.background = `var(${lm.color})`;
   badge.textContent = lm.label + (n.shape === 'hex' ? ' · resource' : n.shape === 'pipe' ? ' · job' : ' · file');
   body.appendChild(badge);
 
@@ -878,6 +917,19 @@ function setTool(t){
 $('toolSelect').addEventListener('click', () => setTool('select'));
 $('toolHand').addEventListener('click', () => setTool('hand'));
 $('toolFit').addEventListener('click', () => fitView());
+
+/* theme: colors flow through CSS vars, so flipping the attribute is enough */
+$('themeToggle').addEventListener('click', () => {
+  const dark = document.documentElement.getAttribute('data-theme') !== 'dark';
+  document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
+  try { localStorage.setItem('zui-theme', dark ? 'dark' : 'light'); } catch(e){}
+});
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', ev => {
+  let stored = null;
+  try { stored = localStorage.getItem('zui-theme'); } catch(e){}
+  if (stored) return; /* user override wins */
+  document.documentElement.setAttribute('data-theme', ev.matches ? 'dark' : 'light');
+});
 document.getElementById('viewEng').addEventListener('click', () => setViewMode('engineer'));
 document.getElementById('viewProd').addEventListener('click', () => setViewMode('product'));
 
@@ -1044,7 +1096,7 @@ function updateMinimap(){
     el('rect', {
       x:mmOff.x + (c.box.x - mmBB.x)*mmScale, y:mmOff.y + (c.box.y - mmBB.y)*mmScale,
       width:c.box.w * mmScale, height:c.box.h * mmScale, rx:2,
-      fill:cssVar(c.color), 'fill-opacity':0.35
+      style:`fill:var(${c.color})`, 'fill-opacity':0.35
     }, mmFrames);
   });
   nodes.forEach(n => {
